@@ -23,6 +23,13 @@ rust-version = "1.88"
 repository = "https://github.com/xirtus/foreplay"
 homepage = "https://sexos.dev"
 
+[workspace.dependencies]
+# Principle #1 (from 3JSE): Bevy is an upgradable modular substrate, NEVER a fork.
+# Core ECS & Reflection support no_std / custom platforms (Linux + SexOS userspace).
+bevy_ecs = { version = "0.20.1", default-features = false, features = ["std", "bevy_reflect"] }
+bevy_reflect = { version = "0.20.1", default-features = false, features = ["std"] }
+bevy_math = { version = "0.20.1", default-features = false, features = ["std", "alloc"] }
+
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 missing_debug_implementations = "warn"

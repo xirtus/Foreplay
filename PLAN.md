@@ -58,20 +58,20 @@ Every deliverable carries an explicit classification tag (`[mechanical]`, `[sema
 
 ---
 
-## 3. Upstream C++ / Godot-to-Rust Idiom Map
+## 3. Godot C++ → Foreplay IR → Bevy 0.20 Substrate Map
 
-Decided once in Phase 0 and applied uniformly across all waves:
+Following **3JSE Principle #1** (*"Bevy is a dependency, never a fork"*), Foreplay maps Godot's high-productivity authoring model directly onto **Bevy 0.20's** modern primitives:
 
-| Upstream Godot / C++ Construct | Foreplay Rust Mapping |
-| :--- | :--- |
-| `Object*` / `ObjectID` | Generational `NodeId` (`foreplay_ir::NodeId`) into `SceneArena` |
-| `RID` (Server opaque handle) | Typed generational `Rid<T>` (`Rid<MeshTag>`, `Rid<Body3DTag>`) |
-| `Ref<Resource>` refcounted ptr | `ResourceHandle<T>` (`Arc`-backed immutable payload or arena ID + copy-on-write edit layer) |
-| `Variant` tagged union | `IrValue` enum (`Nil`, `Bool`, `I64`, `F64`, `String`, `Vec2`, `Vec3`, `Quat`, `Transform3D`, `Color`, `NodePath`, `ResourceRef`, `Array`, `Map`) |
-| `ClassDB::bind_method` + `ADD_PROPERTY` | `#[derive(ForeplayNode)]` + `#[export(...)]` + `#[feel_spec(...)]` generating `NodeSchema` |
-| `UndoRedo::add_do_method` / `add_undo_method` | Invertible `EditorCommand` enum variant (`apply(&mut IrDocument)` / `inverse()`) |
-| `Node::_ready`, `_process`, `_physics_process` | `LifecyclePhase` staged systems operating over disjoint component queries + deferred `SceneCommandQueue` |
-| Raw C struct binary file cast (`*(Header*)buf`) | Checked reader cursor / `bytemuck::try_from_bytes` — audited by `cargo-fuzz` |
+| Upstream Godot 4 Construct | Foreplay IR / Authoring Surface | Underlying Bevy `0.20` Substrate |
+| :--- | :--- | :--- |
+| `Object*` / `ObjectID` | Generational `NodeId` (`foreplay_ir::NodeId`) | `bevy_ecs::entity::Entity` mapped via `SceneTree::ir_to_entity` |
+| `Node` subclassing (`CharacterBody3D : Node3D`) | `class_name` + automatic base property composition | Bevy **Required Components** (`#[require(Transform, Visibility)]`) |
+| `Node::add_child` / scene hierarchy | `IrNode::parent` + `PackedScene` override layers | Bevy **ECS Relations** (`ChildOf` / `Children`) with automatic cleanup |
+| `Object::emit_signal` / `connect` | `SignalConnection` in `.fscn` / `.tscn` | Bevy **Observers & Bubbling Triggers** (`world.trigger_targets(...)`) |
+| `ClassDB` + `@export` | `ReflectNode` + `FeelSpecKnob` | `bevy_reflect::Reflect` + custom type attributes (`#[reflect(@FeelSpec)]`) |
+| Remote Scene Debugger | `foreplay-harness` (`Observe -> Plan -> Act -> Verify`) | `EditorCommand` Undo/Redo bus + `bevy_remote` (BRP JSON-RPC 2.0) + MCP |
+| `Viewport` / 3D Gizmo raycast | Dockable `2D` & `3D` viewports in `egui_dock` | `bevy_render` offscreen `RenderTarget::Image` + `bevy_picking` |
+| Raw C struct binary file cast (`*(Header*)buf`) | `foreplay-porthost` `port://` archive reader | Checked reader cursor / `bytemuck` — audited by `cargo-fuzz` |
 
 ---
 
