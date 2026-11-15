@@ -7,4 +7,7 @@ pub mod archive;
 pub mod bundle;
 
 pub use archive::{FpckArchive, FpckError, TocEntry, fnv1a_64};
-pub use bundle::{ExportConfig, ExportError, ExportOutput, ExportTarget, ProjectExporter};
+pub use bundle::{
+    ExportConfig, ExportError, ExportOutput, ExportTarget, ProjectExporter,
+    verify_self_contained_export_binary, verify_self_contained_export_bytes,
+};

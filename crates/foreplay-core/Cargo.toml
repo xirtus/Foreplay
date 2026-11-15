@@ -4,16 +4,16 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "MPL-2.0"
-description = "Godot-parity SceneTree, Node composition, and Signals built around Bevy 0.20 ECS Relations, Required Components, and Observers"
+description = "Godot-parity SceneTree, 260+ ClassDB, Skeleton3D/AnimationTree, cosmic-text shaping, TileMap autotiling, and Signals around Bevy 0.20"
 
 [dependencies]
 foreplay-ir = { path = "../foreplay-ir" }
 bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
 bevy_math = { workspace = true, features = ["bevy_reflect"] }
+cosmic-text = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
-
 
 [lints]
 workspace = true

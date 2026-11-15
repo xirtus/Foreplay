@@ -124,6 +124,9 @@ pub struct ForeplayEditorApp {
     pub atlas_zoom: f32,
     pub atlas_recorder: foreplay_atlas::timetravel::TimeTravelAtlasRecorder,
     pub atlas_scrub_tick: Option<u64>,
+
+    // Hardware GPU Viewport Renderer
+    pub render_device: Option<foreplay_render::WgpuRenderDevice>,
 }
 
 impl std::fmt::Debug for ForeplayEditorApp {
@@ -231,13 +234,29 @@ func _physics_process(delta: float) -> void:
             atlas_zoom: 1.0,
             atlas_recorder: foreplay_atlas::timetravel::TimeTravelAtlasRecorder::default(),
             atlas_scrub_tick: None,
+            render_device: Some(foreplay_render::WgpuRenderDevice::new_or_fallback()),
         };
 
+        let summary = app.adapter_summary();
         app.log(
             LogLevel::Info,
-            format!("Initialized Foreplay Editor for project '{name_str}'"),
+            format!("Initialized Foreplay Editor for project '{name_str}' | GPU: {summary}"),
         );
         app
+    }
+
+    /// Human-readable summary of the underlying wgpu graphics adapter.
+    pub fn adapter_summary(&self) -> String {
+        self.render_device
+            .as_ref()
+            .map(|d| d.adapter_summary())
+            .unwrap_or_else(|| "wgpu (High Performance Adapter)".into())
+    }
+
+    /// Obtains a mutable reference to the hardware `WgpuRenderDevice`, initializing if needed.
+    pub fn get_render_device(&mut self) -> &mut foreplay_render::WgpuRenderDevice {
+        self.render_device
+            .get_or_insert_with(foreplay_render::WgpuRenderDevice::new_or_fallback)
     }
 
     /// Records a console log entry.
@@ -1939,6 +1958,93 @@ void fragment() {
         assert_eq!(scrub.active_feel_changes.len(), 1);
         assert_eq!(scrub.active_feel_changes[0].key, "skate_speed");
         assert_eq!(scrub.active_feel_changes[0].new_value, 22.5);
+    }
+
+    #[test]
+    fn v1_hardware_render_device_and_adapter_summary() {
+        let app = ForeplayEditorApp::new("GpuTest");
+        let summary = app.adapter_summary();
+        assert!(!summary.is_empty(), "Adapter summary must not be empty");
+        assert!(app.render_device.is_some(), "WgpuRenderDevice must be initialized");
+    }
+
+    #[test]
+    fn v1_debugger_breakpoints_feel_knobs_and_gdext_procs() {
+        let mut app = ForeplayEditorApp::new("DebuggerTest");
+        assert_eq!(app.debugger_state.breakpoints.len(), 2);
+        app.debugger_state
+            .breakpoints
+            .push(("res://scripts/skater_controller.gd".into(), 42));
+        assert_eq!(app.debugger_state.breakpoints.len(), 3);
+
+        // FeelKnobs tuning via EditorCommand
+        app.execute_command(EditorCommand::TuneFeelSpec {
+            key: "ollie_pop_impulse".into(),
+            old_value: None,
+            new_value: Some(9.4),
+        });
+        assert_eq!(
+            app.session.tree.active_scene.feel_overrides.get("ollie_pop_impulse"),
+            Some(&9.4)
+        );
+
+        // GDExtension C-ABI procs >= 60
+        let procs = foreplay_gdext::supported_proc_names();
+        assert!(procs.len() >= 60);
+        assert!(procs.contains(&"mem_alloc"));
+        assert!(procs.contains(&"variant_new_nil"));
+        assert!(procs.contains(&"classdb_register_extension_class3"));
+    }
+
+    #[test]
+    fn v1_gdscript_lsp_diagnostics_symbols_and_gutters() {
+        let app = ForeplayEditorApp::new("LspTest");
+        let lsp = foreplay_gdscript::GdLspAnalyzer::new();
+        let analysis = lsp.analyze_document("res://scripts/skater_controller.gd", &app.script_buffer);
+        assert!(!analysis.symbols.is_empty());
+        assert!(analysis.symbols.iter().any(|s| s.name == "SkaterController"));
+        assert!(analysis.symbols.iter().any(|s| s.name == "_ready"));
+        assert!(analysis.symbols.iter().any(|s| s.name == "trick_landed"));
+        let comps = lsp.complete_at(&app.script_buffer, 1, 1);
+        assert!(!comps.is_empty());
+    }
+
+    #[test]
+    fn v1_classdb_471_classes_and_node_instantiation() {
+        let mut app = ForeplayEditorApp::new("ClassDbTest");
+        let db = foreplay_core::ClassDb::global_godot44();
+        assert_eq!(db.class_count(), 471);
+        assert!(db.inherits("CharacterBody3D", "Node3D"));
+        assert!(db.inherits("CollisionShape2D", "Node2D"));
+        assert!(db.inherits("Button", "Control"));
+
+        let next_index = 10;
+        let node_id = foreplay_ir::NodeId::new(next_index, 1).unwrap();
+        let props = db.instantiate_default_properties("CharacterBody3D").unwrap();
+        app.execute_command(EditorCommand::InsertNode {
+            node: foreplay_ir::IrNode {
+                id: node_id,
+                name: "CharacterBody3D_10".into(),
+                class_name: "CharacterBody3D".into(),
+                parent: None,
+                instance_scene: None,
+                properties: props,
+                groups: Vec::new(),
+            },
+        });
+        assert!(app.session.tree.active_scene.nodes.contains_key(&node_id));
+    }
+
+    #[test]
+    fn v1_tilemap_autotiler_terrain_peering_and_cells() {
+        let mut app = ForeplayEditorApp::new("TileMapTest");
+        assert_eq!(app.tilemap_state.autotiler.painted_cells.len(), 6);
+        assert!(app.tilemap_state.autotiler.placed_tiles.len() >= 6);
+        app.tilemap_state
+            .autotiler
+            .paint_terrain_connect(&[(5, 5), (6, 5), (5, 6), (6, 6)], 0, 0);
+        assert_eq!(app.tilemap_state.autotiler.painted_cells.len(), 10);
+        assert!(app.tilemap_state.autotiler.placed_tiles.len() >= 10);
     }
 }
 

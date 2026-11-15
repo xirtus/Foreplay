@@ -140,3 +140,30 @@ Following **3JSE Principle #1** (*"Bevy is a dependency, never a fork"*), Forepl
   - *Verified Exit Gate:* Headless `egui` verification across all **8 IDE workspaces**, **7 bottom docks**, and **5 modals** + 36/36 live PBR/Polyamour/Three.js integration tests PASS.
 - [x] **Phase 11 — v2.0 Adversarial Red-Team Verification (`foreplay-verifier`) (COMPLETE)**
   - *Verified Exit Gate:* **30 / 30** independent adversarial `proptest` & corruption suites (`39/39` test runners) PASS 100% green with zero panics.
+
+
+---
+
+## 6. Foreplay v1.0.0 — Virtually Complete Godot 4 Rust Port (Milestones M1–M4 / Phases 12–16 COMPLETE)
+
+- [x] **Phase 12 (Milestone M1) — Real Hardware Runtime (`wgpu` 30 GPU, `rapier2d/3d`, `cpal`/`symphonia`, `gilrs` InputMap) (COMPLETE)**
+  - `12.1` Hardware `wgpu` `30.0.2` Clustered Forward+ PBR + Cascaded Shadows + GPU Skinning + GPU Compute Particles + `CanvasItem` 2D SDF Lights/Occluders + `image` texture mipmaps in `foreplay-render` `[semantic]` (Carbon High)
+  - `12.2` Production `rapier2d` & `rapier3d` `0.36.1` (`enhanced-determinism`) behind `PhysicsServer` live hotswap + CCD, sleeping, 6-DOF joints, shapecasts, and Godot 4 `CharacterBody2D/3D` `move_and_slide` in `foreplay-physics` `[semantic]` (Carbon High)
+  - `12.3` Real-time `cpal` `0.18.2` SPSC audio hardware output + `symphonia` `0.6.1` multi-codec decoder (WAV/Ogg Vorbis/MP3/FLAC/PCM) + 3D Doppler audio in `foreplay-audio` & `gilrs` `0.11.2` gamepads + Godot `InputMap` actions/chords/rumble + `winit` translation in `foreplay-platform` `[mechanical]` (Hydrogen)
+  - *Verified Exit Gate:* Real Apple Silicon Metal `wgpu` 3D+2D offscreen passes (`46/46` render tests), `Rapier3D` <-> `PortFaithful` mid-air hotswap & stair-stepping `move_and_slide` (`34/34` physics tests), and `cpal`/`symphonia`/`InputMap` (`52/52` audio+platform tests) PASS 100% green.
+- [x] **Phase 13 (Milestone M2) — `ClassDB` 471 Classes, `.glb` Rigged Animation, `.tres` Resources, `cosmic-text` Shaping & 2D Terrains (COMPLETE)**
+  - `13.1` 471-class Godot 4.4 `ClassDB` hierarchy, `Skeleton3D` inverse-bind skinning, `AnimationTree` (`StateMachine` + `BlendSpace1D/2D`), `cosmic-text` `0.19.0` Unicode shaping + `RichTextLabel` BBCode, and `TileMapLayer` Wang/bitmask autotiling in `foreplay-core` `[semantic]` (Carbon High)
+  - `13.2` Binary/JSON `gltf` `1.4.1` (`.glb`/`.gltf`) rigged scene/skin/morph/animation importer + Godot 4 `.tres` resource parser/serializer + threaded `ResourceLoader` & `uid://` cache in `foreplay-porthost` `[mechanical]` (Hydrogen)
+  - *Verified Exit Gate:* 471-class `ClassDB`, rigged `.glb` skinning + `AnimationTree`, `cosmic-text` RGBA8 glyph shaping, `.tres` round-trips, and threaded `ResourceLoader` (`68/68` core+porthost tests & Gate 6) PASS 100% green.
+- [x] **Phase 14 (Milestone M3) — Complete GDScript 2.0 (`await`, Lambdas, `match` Guards, 444 Builtins & LSP) (COMPLETE)**
+  - `14.1` Suspendable `await` coroutines, first-class `Callable`/lambdas, `super()`, structural `match` guards, typed `Array[T]`/`Dictionary[K,V]`, 444 Godot 4.4 builtin methods, static type checker, and GDScript LSP engine in `foreplay-gdscript` `[semantic]` (Carbon High)
+  - *Verified Exit Gate:* Timer & signal coroutines, higher-order `.map`/`.filter`/`.reduce`, `match` destructuring + `when` guards, 444-entry catalog, and `GdLspAnalyzer` (`31/31` tests & Gate 7) PASS 100% green.
+- [x] **Phase 15 (Milestone M4) — `GDExtension` C ABI, Standalone `foreplay-player`, Embedded `FPCKEXEC` Exports & Remote PIE IPC Debugger (COMPLETE)**
+  - `15.1` `#[repr(C)]` Godot 4.4 `GDExtensionInterface` (`gdext_get_proc_address`, 82 C ABI endpoints, `.gdextension` manifest loader, dynamic library + in-process `ClassDB`/`GdVm` bridge) in `foreplay-gdext` `[semantic]` (Carbon High)
+  - `15.2` Standalone `foreplay-player` native runtime executable + self-contained `FPCKEXEC` binary trailer embedding in `foreplay-export` + TCP loopback JSON-Lines Remote PIE Debug Server/Client `[semantic]` (Carbon High)
+  - `15.3` Hardware `wgpu` viewport texture integration, GDScript LSP autocomplete & gutter breakpoints, Remote PIE Debugger dock, 471-class `CreateNodeDialog`, `TileMap` terrain autotile brush, `GDExtension` plugin panel, and 8-Gate `verify-all-gates` harness in `foreplay-editor` & `foreplay-harness` `[mechanical]` (Hydrogen)
+  - *Verified Exit Gate:* `foreplay-player --self-test`, `foreplay-editor` (8 workspaces, 7 bottom docks, 5 modals), and **8 / 8 Verification Gates** (`382ms`) PASS 100% green.
+- [x] **Phase 16 — v1.0 Independent Red-Team Adversarial Verification (`foreplay-verifier`) (COMPLETE)**
+  - `16.1` 12 new `proptest` & hostile binary corruption fuzzers across `.glb`, `.tres`, GDScript coroutines/LSP, `GDExtension` C ABI marshaling, `Rapier` hotswap, `TileMap` autotiling, and `FPCKEXEC` trailers `[semantic]` (Carbon Verifier)
+  - *Verified Exit Gate:* **42 / 42** adversarial suites (`69/69` verifier tests) & **438 / 438** total tests across all **19 crates** (`82,166 LoC`) PASS 100% green with **0 clippy warnings** and **0 stubs**.
+

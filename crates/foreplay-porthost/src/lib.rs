@@ -6,20 +6,36 @@
 
 pub mod archive;
 pub mod conformance;
+pub mod gltf_import;
 pub mod oracle;
+pub mod resource_loader;
 pub mod streaming;
+pub mod tres;
 pub mod tscn;
 
 pub use archive::{BinaryReadError, BinaryReader, DirectoryPortMount, Endian, SimplePakMount};
 pub use conformance::{
     ConformanceReport, generate_godot4_conformance_corpus, run_200_tscn_conformance_gate,
 };
+pub use gltf_import::{
+    build_sample_rigged_character_glb, import_glb_bytes_to_ir, GlbAnimationClip,
+    GlbAnimationProperty, GlbAnimationTrack, GlbImportError, GlbImportedBundle, GlbInterpolation,
+    GlbMaterialData, GlbMeshData, GlbPrimitiveData, GlbSkinData, GlbTrackValues,
+};
 pub use oracle::{
     DifferentialReport, FrameDifferentialVerdict, OracleFrameSample, evaluate_trace,
     generate_1000_frame_skater_trace, run_1000_frame_differential_gate,
 };
+pub use resource_loader::{
+    generate_fnv1a_uid, LoadedResource, ResourceLoaderError, ThreadLoadStatus,
+    ThreadedResourceLoader, UidRegistry,
+};
 pub use streaming::{
     ByoRomWizard, CellCoord, CellStreamDelta, RomSignature, RomValidationResult, WorldCellStreamer,
+};
+pub use tres::{
+    emit_tres, format_tres_value, parse_tres, parse_tres_value, TresExtResource, TresFile,
+    TresHeader, TresParseError, TresResource, TresSubResource, TresValue,
 };
 pub use tscn::{TscnParseError, export_ir_to_tscn, parse_godot_value, parse_tscn_to_ir};
 

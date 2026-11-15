@@ -3,6 +3,8 @@
 //! plus Godot 4 `CharacterBody3D::move_and_slide`, 2D physics server, raycasts,
 //! Area3D triggers, and 3D constraints.
 
+pub mod character_controller;
+pub mod rapier_backend;
 pub mod server_2d;
 pub mod trimesh_convex;
 
@@ -11,6 +13,16 @@ use std::sync::{Arc, RwLock};
 use bevy_math::Vec3;
 use foreplay_ir::{NodeId, PhysicsBackend};
 
+pub use character_controller::{
+    CharacterBody2DController, CharacterBody3DController, KinematicSlideCollision2D,
+    KinematicSlideCollision3D,
+};
+pub use rapier_backend::{
+    BodyStateSnapshot3D, BodyType, HotswapPhysicsBridge3D, JointConfig2D, JointConfig3D,
+    JointMotorConfig, PhysicsDirectSpaceState2D, PhysicsDirectSpaceState3D,
+    PhysicsStateSnapshot3D, PointHit2D, PointHit3D, RapierBackend3D, RapierSpace2D, RapierSpace3D,
+    RigidBodyConfig2D, RigidBodyConfig3D, ShapeConfig2D, ShapeConfig3D, ShapeHit2D, ShapeHit3D,
+};
 pub use server_2d::{CharacterBody2D, Collider2D, PhysicsBody2D, PhysicsServer2D, RayHit2D, StaticRect2D};
 pub use trimesh_convex::{
     closest_point_on_triangle, gjk_intersects, ContactManifold3D, ConvexHullCollider3D,
@@ -679,6 +691,7 @@ pub trait StatefulPhysicsBackend: PhysicsBackend {
 pub enum PhysicsBackendKind {
     StandardRigid,
     SkatePortArcade,
+    Rapier3D,
 }
 
 /// Standard semi-implicit Euler 3D rigid body simulator with joint constraints.
@@ -1060,6 +1073,18 @@ impl PhysicsServer3D {
         }
     }
 
+    /// Construct server initialized with the production Rapier3D backend.
+    #[must_use]
+    pub fn new_rapier() -> Self {
+        let state = Arc::new(RwLock::new(PhysicsWorldState::new()));
+        let space = Arc::new(RwLock::new(RapierSpace3D::new()));
+        let backend = RapierBackend3D::new(space, state.clone());
+        Self {
+            active: Box::new(backend),
+            world_state: state,
+        }
+    }
+
     /// Add a physics body to the server simulation.
     pub fn add_body(&mut self, body: PhysicsBody3D) {
         self.world_state.write().unwrap().add_body(body);
@@ -1087,7 +1112,7 @@ impl PhysicsServer3D {
         std::mem::replace(&mut self.active, next)
     }
 
-    /// Live mid-frame backend hotswap between `StandardRigid` and `SkatePortArcade`
+    /// Live mid-frame backend hotswap between `StandardRigid`, `SkatePortArcade`, and `Rapier3D`
     /// seamlessly preserving every body's position, linear velocity, angular velocity, and collider!
     pub fn hotswap_preserving_bodies(&mut self, kind: PhysicsBackendKind) -> Box<dyn PhysicsBackend> {
         let next: Box<dyn PhysicsBackend> = match kind {
@@ -1096,6 +1121,11 @@ impl PhysicsServer3D {
             }
             PhysicsBackendKind::SkatePortArcade => {
                 Box::new(SkatePortArcadeBackend::from_shared_state(self.world_state.clone()))
+            }
+            PhysicsBackendKind::Rapier3D => {
+                let mut space = RapierSpace3D::new();
+                HotswapPhysicsBridge3D::swap_to_rapier(&self.world_state.read().unwrap(), &mut space);
+                Box::new(RapierBackend3D::new(Arc::new(RwLock::new(space)), self.world_state.clone()))
             }
         };
         std::mem::replace(&mut self.active, next)

@@ -4,11 +4,15 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "MPL-2.0"
-description = "AudioServer bus mixer and pluggable audio decoder trait (Vorbis, Opus, ported XMA)"
+description = "AudioServer bus mixer, real-time cpal hardware output, and symphonia multi-codec audio decoder (WAV, Vorbis, MP3, FLAC, PCM)"
 
 [dependencies]
 foreplay-ir = { path = "../foreplay-ir" }
 bevy_math = { workspace = true }
+cpal = { workspace = true }
+symphonia = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true

@@ -1,6 +1,18 @@
 //! Host abstraction isolating OS/windowing specifics so the exact same `foreplay-editor`
 //! and runtime crates ship on Linux, Steam Deck, macOS, Windows, Web, and SexOS (`sexlife` suite).
 
+pub mod gamepad_gilrs;
+pub mod input_map;
+
+pub use gamepad_gilrs::{
+    from_winit_keycode, from_winit_mouse_button, map_gilrs_axis, map_gilrs_button,
+    GilrsGamepadBridge, RumbleEffect,
+};
+pub use input_map::{
+    ActionConfig, GamepadAxisId, GamepadButtonId, InputEvent, InputMap, InputServer, InputTrigger,
+    KeyCodeId, MouseButtonId,
+};
+
 /// Target execution host detected or configured at compile/boot time.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum HostTarget {
@@ -413,8 +425,10 @@ impl SexOsScanoutSurface {
     }
 }
 
+use serde::{Deserialize, Serialize};
+
 /// Standard keyboard scancodes for cross-platform input mapping.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 pub enum KeyCode {
     KeyA, KeyB, KeyC, KeyD, KeyE, KeyF, KeyG, KeyH, KeyI, KeyJ, KeyK, KeyL, KeyM,
     KeyN, KeyO, KeyP, KeyQ, KeyR, KeyS, KeyT, KeyU, KeyV, KeyW, KeyX, KeyY, KeyZ,

@@ -498,11 +498,27 @@ impl StateTransition {
 }
 
 /// State machine playback mimicking Godot 4's `AnimationNodeStateMachinePlayback`.
-#[derive(Clone, PartialEq, Debug, Default)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct AnimationNodeStateMachine {
     pub states: BTreeMap<String, String>, // state_name -> animation clip name
     pub transitions: Vec<StateTransition>,
     pub current_state: String,
+    pub previous_state: Option<String>,
+    pub xfade_progress: f32, // 0.0 to 1.0
+    pub active_xfade_duration: f32,
+}
+
+impl Default for AnimationNodeStateMachine {
+    fn default() -> Self {
+        Self {
+            states: BTreeMap::new(),
+            transitions: Vec::new(),
+            current_state: String::new(),
+            previous_state: None,
+            xfade_progress: 1.0,
+            active_xfade_duration: 0.0,
+        }
+    }
 }
 
 impl AnimationNodeStateMachine {
@@ -514,6 +530,7 @@ impl AnimationNodeStateMachine {
         let s = state_name.into();
         if self.states.is_empty() {
             self.current_state = s.clone();
+            self.xfade_progress = 1.0;
         }
         self.states.insert(s, clip_name.into());
     }
@@ -548,7 +565,17 @@ impl AnimationNodeStateMachine {
         while let Some(path) = queue.pop_front() {
             let last = path.last().unwrap();
             if last == target_state {
+                let xfade = self
+                    .transitions
+                    .iter()
+                    .find(|t| t.from == self.current_state && t.to == path[1])
+                    .map(|t| t.crossfade_time)
+                    .unwrap_or(0.2);
+
+                self.previous_state = Some(self.current_state.clone());
                 self.current_state = target_state.to_string();
+                self.active_xfade_duration = xfade.max(0.001);
+                self.xfade_progress = if xfade > 0.0 { 0.0 } else { 1.0 };
                 return Ok(path);
             }
 
@@ -567,6 +594,62 @@ impl AnimationNodeStateMachine {
             "no valid transition path from '{}' to '{}'",
             self.current_state, target_state
         ))
+    }
+
+    /// Advances active crossfade and checks parameter conditions for auto-advance transitions.
+    pub fn advance(&mut self, dt: f32, parameters: &BTreeMap<String, IrValue>) -> Vec<(String, f32)> {
+        // 1. Check auto-advance conditions from current state if not actively transitioning
+        if self.xfade_progress >= 1.0 {
+            for t in &self.transitions {
+                if t.from == self.current_state {
+                    let should_advance = match &t.advance_condition {
+                        Some(cond) => match parameters.get(cond) {
+                            Some(IrValue::Bool(b)) => *b,
+                            Some(IrValue::F64(v)) => *v > 0.0,
+                            Some(IrValue::I64(v)) => *v > 0,
+                            _ => false,
+                        },
+                        None => false,
+                    };
+
+                    if should_advance {
+                        self.previous_state = Some(self.current_state.clone());
+                        self.current_state = t.to.clone();
+                        self.active_xfade_duration = t.crossfade_time.max(0.001);
+                        self.xfade_progress = 0.0;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // 2. Advance active crossfade
+        if self.xfade_progress < 1.0 {
+            self.xfade_progress += dt / self.active_xfade_duration.max(0.0001);
+            if self.xfade_progress >= 1.0 {
+                self.xfade_progress = 1.0;
+                self.previous_state = None;
+            }
+        }
+
+        let mut weights = Vec::new();
+        let curr_clip = self.states.get(&self.current_state).cloned().unwrap_or_default();
+
+        if let Some(ref prev) = self.previous_state {
+            let prev_clip = self.states.get(prev).cloned().unwrap_or_default();
+            let prev_w = 1.0 - self.xfade_progress;
+            let curr_w = self.xfade_progress;
+            if prev_w > 0.001 {
+                weights.push((prev_clip, prev_w));
+            }
+            if curr_w > 0.001 {
+                weights.push((curr_clip, curr_w));
+            }
+        } else {
+            weights.push((curr_clip, 1.0));
+        }
+
+        weights
     }
 }
 

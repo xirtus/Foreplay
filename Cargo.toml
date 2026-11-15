@@ -10,21 +10,23 @@ members = [
     "crates/foreplay-net",
     "crates/foreplay-script",
     "crates/foreplay-gdscript",
+    "crates/foreplay-gdext",
     "crates/foreplay-atlas",
     "crates/foreplay-harness",
     "crates/foreplay-porthost",
     "crates/foreplay-polyamour",
     "crates/foreplay-threejs",
     "crates/foreplay-export",
+    "crates/foreplay-player",
     "crates/foreplay-editor",
     "crates/foreplay-verifier",
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.95"
-repository = "https://github.com/xirtus/foreplay"
+repository = "https://github.com/xirtus/Foreplay"
 homepage = "https://sexos.dev"
 
 [workspace.dependencies]
@@ -37,6 +39,25 @@ bevy_math = { version = "0.20.1", default-features = false, features = ["std", "
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
+
+# Hardware GPU, Windowing & Textures (Metal / Vulkan / DX12 / WebGPU)
+wgpu = "30.0.2"
+egui-wgpu = "0.36.2"
+winit = "0.30.13"
+bytemuck = { version = "1.25.2", features = ["derive"] }
+pollster = "1.0.1"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "hdr", "tga", "bmp"] }
+
+# Production 2D & 3D Physics (Rapier alongside PortFaithful live hotswap)
+rapier2d = { version = "0.36.1", features = ["enhanced-determinism", "serde-serialize"] }
+rapier3d = { version = "0.36.1", features = ["enhanced-determinism", "serde-serialize"] }
+
+# Real-Time OS Audio I/O, Multi-Codec Decoding, Gamepad Input, glTF 2.0 & Unicode Shaping
+cpal = "0.18.2"
+symphonia = { version = "0.6.1", default-features = false, features = ["pcm", "wav", "ogg", "vorbis", "mp3", "flac"] }
+gilrs = "0.11.2"
+gltf = { version = "1.4.1", default-features = false, features = ["utils", "names", "KHR_lights_punctual", "KHR_materials_unlit", "KHR_materials_emissive_strength", "extras"] }
+cosmic-text = "0.19.0"
 
 # Editor UI Foundation (Linux/Wayland/X11/SteamDeck, macOS, Windows, WebGPU & SexOS egui backend)
 egui = "0.36"

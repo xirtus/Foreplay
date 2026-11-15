@@ -22,6 +22,20 @@ use crate::v2_worldclass_fuzzers::{
     verify_trimesh_gjk_ragdoll_and_moan_timeline_suite,
     verify_ue6_speculative_rollback_determinism_suite,
 };
+use crate::v1_godot_parity_fuzzers::{
+    verify_audio_ringbuffer_and_input_deadzone_suite,
+    verify_bbcode_and_terrain_autotiler_suite,
+    verify_classdb_hierarchy_invariants_suite,
+    verify_fpckexec_binary_trailer_adversarial_suite,
+    verify_gdextension_c_abi_boundary_suite,
+    verify_gdextension_manifest_fuzzing_suite,
+    verify_gdscript_coroutine_resumption_suite,
+    verify_gdscript_match_and_typed_collections_suite,
+    verify_gdlsp_analyzer_bounds_suite,
+    verify_hostile_glb_fuzzing_suite,
+    verify_rapier_port_hotswap_and_controller_proptest_suite,
+    verify_tres_manifest_fuzzing_suite,
+};
 use crate::wave2b_fuzzers::{
     verify_1000_frame_physics_differential_gate, verify_fpck_archive_adversarial_suite,
     verify_gdshader_compiler_adversarial_suite, verify_godot4_200_scene_conformance_gate,
@@ -529,5 +543,18 @@ pub fn run_all_adversarial_suites() -> Vec<VerificationReceipt> {
         verify_ue6_speculative_rollback_determinism_suite(),
         verify_meshlet_and_pbr_perceptual_suite(),
         verify_trimesh_gjk_ragdoll_and_moan_timeline_suite(),
+        // Phase 16 (Track M4-D): Independent Red-Team v1.0.0 Godot-Parity Adversarial Verifier
+        verify_hostile_glb_fuzzing_suite(),
+        verify_tres_manifest_fuzzing_suite(),
+        verify_gdextension_manifest_fuzzing_suite(),
+        verify_gdscript_coroutine_resumption_suite(),
+        verify_gdscript_match_and_typed_collections_suite(),
+        verify_gdlsp_analyzer_bounds_suite(),
+        verify_gdextension_c_abi_boundary_suite(),
+        verify_classdb_hierarchy_invariants_suite(),
+        verify_rapier_port_hotswap_and_controller_proptest_suite(),
+        verify_fpckexec_binary_trailer_adversarial_suite(),
+        verify_bbcode_and_terrain_autotiler_suite(),
+        verify_audio_ringbuffer_and_input_deadzone_suite(),
     ]
 }

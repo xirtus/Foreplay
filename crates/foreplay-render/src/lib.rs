@@ -1,11 +1,19 @@
 pub mod benchmark;
+pub mod canvas2d;
 pub mod meshlet;
 pub mod pbr_gi;
 pub mod perceptual;
 pub mod pipeline;
 pub mod shader;
+pub mod textures;
+pub mod wgpu_backend;
 
 pub use benchmark::{run_10k_entity_render_benchmark, DrawCommand, RenderBenchmarkReceipt};
+pub use canvas2d::{
+    CanvasBatch2D, CanvasBoneWeight2D, CanvasItem, CanvasItemBatcher2D, CanvasItemKind,
+    CanvasModulate, CanvasPolygon2D, CanvasVertex2D, DirectionalLight2D, LightOccluder2D,
+    OccluderCullMode, PointLight2D, Rect2D, SdfLightField2D,
+};
 pub use meshlet::{build_meshlets, cull_meshlets, Meshlet, MAX_MESHLET_TRIANGLES, MAX_MESHLET_VERTICES};
 pub use pbr_gi::{
     agx_tonemap_srgb, render_shaded_pbr_viewport_rgba8, PbrMaterialDesc, PbrViewportParams,
@@ -14,6 +22,12 @@ pub use pbr_gi::{
 pub use perceptual::{compute_psnr_rgba8, compute_ssim_rgba8};
 pub use pipeline::{cull_aabbs_frustum, EmissionShape, Frustum, GpuParticles3DSim, Particle3D, Plane, ViewportDebugDraw};
 pub use shader::{compile_gdshader_to_wgsl, ShaderCompileError, ShaderType, ShaderUniform, UniformHint, UniformType, VisualShaderGraph, VisualShaderNode};
+pub use textures::{DecodedTexture, GpuTexture, MipFilter, TextureAssetLoader, TextureError};
+pub use wgpu_backend::{
+    ComputeParticle3D, HardwareBonePalette, HardwareDrawItem3D, HardwareFrameOutput,
+    HardwareLight3D, HardwareLightType, HardwareVertex3D, RenderHardwareError, WgpuFrameTelemetry,
+    WgpuRenderDevice,
+};
 
 use std::collections::BTreeMap;
 use bevy_math::{Mat4, Quat, Vec2, Vec3, Vec4};

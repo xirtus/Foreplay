@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "GPL-3.0-only"
-description = "Godot-parity dockable game editor (egui + egui_dock over wgpu & SexOS Silk/egui backend)"
+description = "Godot-parity dockable game editor (egui + egui_dock over hardware wgpu, Remote PIE IPC debugger, GDExtension host & SexOS Silk/egui backend)"
 
 [dependencies]
 foreplay-ir = { path = "../foreplay-ir" }
@@ -16,10 +16,12 @@ foreplay-audio = { path = "../foreplay-audio" }
 foreplay-net = { path = "../foreplay-net" }
 foreplay-script = { path = "../foreplay-script" }
 foreplay-gdscript = { path = "../foreplay-gdscript" }
+foreplay-gdext = { path = "../foreplay-gdext" }
 foreplay-atlas = { path = "../foreplay-atlas" }
 foreplay-harness = { path = "../foreplay-harness" }
 foreplay-porthost = { path = "../foreplay-porthost" }
 foreplay-export = { path = "../foreplay-export" }
+foreplay-player = { path = "../foreplay-player" }
 foreplay-polyamour = { path = "../foreplay-polyamour" }
 foreplay-threejs = { path = "../foreplay-threejs" }
 egui = { workspace = true }

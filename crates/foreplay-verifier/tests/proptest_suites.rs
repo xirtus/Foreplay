@@ -47,6 +47,20 @@ use foreplay_verifier::v2_worldclass_fuzzers::{
     verify_trimesh_gjk_ragdoll_and_moan_timeline_suite,
     verify_ue6_speculative_rollback_determinism_suite,
 };
+use foreplay_verifier::v1_godot_parity_fuzzers::{
+    verify_audio_ringbuffer_and_input_deadzone_suite,
+    verify_bbcode_and_terrain_autotiler_suite,
+    verify_classdb_hierarchy_invariants_suite,
+    verify_fpckexec_binary_trailer_adversarial_suite,
+    verify_gdextension_c_abi_boundary_suite,
+    verify_gdextension_manifest_fuzzing_suite,
+    verify_gdscript_coroutine_resumption_suite,
+    verify_gdscript_match_and_typed_collections_suite,
+    verify_gdlsp_analyzer_bounds_suite,
+    verify_hostile_glb_fuzzing_suite,
+    verify_rapier_port_hotswap_and_controller_proptest_suite,
+    verify_tres_manifest_fuzzing_suite,
+};
 use foreplay_verifier::wave2b_fuzzers::{
     verify_1000_frame_physics_differential_gate, verify_fpck_archive_adversarial_suite,
     verify_gdshader_compiler_adversarial_suite, verify_godot4_200_scene_conformance_gate,
@@ -559,11 +573,11 @@ fn test_frame_differential_verdict_adversarial_oracle() {
     );
 }
 
-/// Unit test verifying all 30 adversarial suites via public run_all_adversarial_suites() API.
+/// Unit test verifying all 42 adversarial suites via public run_all_adversarial_suites() API.
 #[test]
 fn test_run_all_adversarial_suites_receipts() {
     let receipts = run_all_adversarial_suites();
-    assert_eq!(receipts.len(), 30);
+    assert_eq!(receipts.len(), 42);
     for r in &receipts {
         assert!(
             r.invariants_held,
@@ -712,6 +726,94 @@ fn test_trimesh_gjk_ragdoll_and_moan_timeline_suite() {
     let r = verify_trimesh_gjk_ragdoll_and_moan_timeline_suite();
     assert!(r.invariants_held, "trimesh gjk ragdoll timeline suite failed invariants!");
     assert!(r.cases_executed > 0);
+}
+
+// ----------------------------------------------------------------------------
+// Phase 16 (Track M4-D): Independent Red-Team v1.0.0 Godot-Parity Suites
+// ----------------------------------------------------------------------------
+
+#[test]
+fn test_phase16_hostile_binary_glb_fuzzing_suite() {
+    let r = verify_hostile_glb_fuzzing_suite();
+    assert!(r.invariants_held, "hostile glb fuzzing suite failed invariants!");
+    assert!(r.cases_executed >= 50);
+}
+
+#[test]
+fn test_phase16_tres_manifest_fuzzing_suite() {
+    let r = verify_tres_manifest_fuzzing_suite();
+    assert!(r.invariants_held, "tres manifest fuzzing suite failed invariants!");
+    assert!(r.cases_executed >= 20);
+}
+
+#[test]
+fn test_phase16_gdextension_manifest_fuzzing_suite() {
+    let r = verify_gdextension_manifest_fuzzing_suite();
+    assert!(r.invariants_held, "gdextension manifest fuzzing suite failed invariants!");
+    assert!(r.cases_executed >= 10);
+}
+
+#[test]
+fn test_phase16_gdscript_coroutine_resumption_suite() {
+    let r = verify_gdscript_coroutine_resumption_suite();
+    assert!(r.invariants_held, "gdscript coroutine suite failed invariants!");
+    assert!(r.cases_executed >= 10);
+}
+
+#[test]
+fn test_phase16_gdscript_match_and_typed_collections_suite() {
+    let r = verify_gdscript_match_and_typed_collections_suite();
+    assert!(r.invariants_held, "gdscript match & typed collections suite failed invariants!");
+    assert!(r.cases_executed >= 10);
+}
+
+#[test]
+fn test_phase16_gdlsp_analyzer_bounds_suite() {
+    let r = verify_gdlsp_analyzer_bounds_suite();
+    assert!(r.invariants_held, "gdlsp analyzer bounds suite failed invariants!");
+    assert!(r.cases_executed >= 30);
+}
+
+#[test]
+fn test_phase16_gdextension_c_abi_boundary_suite() {
+    let r = verify_gdextension_c_abi_boundary_suite();
+    assert!(r.invariants_held, "gdextension c abi boundary suite failed invariants!");
+    assert!(r.cases_executed >= 80);
+}
+
+#[test]
+fn test_phase16_classdb_hierarchy_invariants_suite() {
+    let r = verify_classdb_hierarchy_invariants_suite();
+    assert!(r.invariants_held, "classdb hierarchy invariants suite failed invariants!");
+    assert!(r.cases_executed >= 5);
+}
+
+#[test]
+fn test_phase16_rapier_port_hotswap_and_controller_suite() {
+    let r = verify_rapier_port_hotswap_and_controller_proptest_suite();
+    assert!(r.invariants_held, "rapier port hotswap and controller suite failed invariants!");
+    assert!(r.cases_executed >= 50);
+}
+
+#[test]
+fn test_phase16_fpckexec_binary_trailer_adversarial_suite() {
+    let r = verify_fpckexec_binary_trailer_adversarial_suite();
+    assert!(r.invariants_held, "fpckexec binary trailer suite failed invariants!");
+    assert!(r.cases_executed >= 50);
+}
+
+#[test]
+fn test_phase16_bbcode_and_terrain_autotiler_suite() {
+    let r = verify_bbcode_and_terrain_autotiler_suite();
+    assert!(r.invariants_held, "bbcode and terrain autotiler suite failed invariants!");
+    assert!(r.cases_executed >= 15);
+}
+
+#[test]
+fn test_phase16_audio_ringbuffer_and_input_deadzone_suite() {
+    let r = verify_audio_ringbuffer_and_input_deadzone_suite();
+    assert!(r.invariants_held, "audio ringbuffer and input deadzone suite failed invariants!");
+    assert!(r.cases_executed >= 100);
 }
 
 

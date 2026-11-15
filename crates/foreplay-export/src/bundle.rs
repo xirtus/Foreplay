@@ -95,6 +95,14 @@ pub enum ExportError {
     ArchiveError(#[from] FpckError),
     #[error("invalid export configuration: {0}")]
     InvalidConfig(String),
+    #[error("embedded pack error: {0}")]
+    EmbeddedPack(String),
+}
+
+impl From<foreplay_player::EmbeddedPackError> for ExportError {
+    fn from(err: foreplay_player::EmbeddedPackError) -> Self {
+        Self::EmbeddedPack(err.to_string())
+    }
 }
 
 /// Multi-platform game project exporter.
@@ -144,6 +152,10 @@ impl ProjectExporter {
                 );
                 bundle_files.insert("game.x86_64".into(), launcher_script.clone().into_bytes());
                 bundle_files.insert("launch.sh".into(), launcher_script.into_bytes());
+
+                let runner_stub = b"\x7fELF_FOREPLAY_RUNNER_STUB";
+                let runner_binary = foreplay_player::embed_pack_trailer(runner_stub, &archive_bytes);
+                bundle_files.insert("foreplay_runner".into(), runner_binary);
             }
 
             ExportTarget::WindowsX64 => {
@@ -157,8 +169,10 @@ impl ProjectExporter {
                     config.game_title
                 );
                 bundle_files.insert("game.bat".into(), batch_launcher.into_bytes());
-                // Minimal portable PE launcher stub
-                bundle_files.insert("game.exe".into(), b"MZ_FOREPLAY_STUB_EXE".to_vec());
+                // Self-contained portable PE executable stamped with FPCKEXEC trailer
+                let exe_stub = b"MZ_FOREPLAY_STUB_EXE";
+                let exe_binary = foreplay_player::embed_pack_trailer(exe_stub, &archive_bytes);
+                bundle_files.insert("game.exe".into(), exe_binary);
             }
 
             ExportTarget::MacOsAppBundle => {
@@ -208,6 +222,13 @@ impl ProjectExporter {
                 bundle_files.insert(
                     format!("{app_name}/Contents/MacOS/launcher"),
                     launcher_sh.as_bytes().to_vec(),
+                );
+
+                let mac_stub = b"\xfe\xed\xfa\xcf_MACH_O_STUB";
+                let mac_binary = foreplay_player::embed_pack_trailer(mac_stub, &archive_bytes);
+                bundle_files.insert(
+                    format!("{app_name}/Contents/MacOS/foreplay_mac"),
+                    mac_binary,
                 );
 
                 bundle_files.insert(
@@ -288,6 +309,11 @@ impl ProjectExporter {
                 );
                 bundle_files.insert("sexpkg.toml".into(), manifest.into_bytes());
                 bundle_files.insert("game.fpck".into(), archive_bytes.clone());
+
+                let sexos_stub = b"SEXOS_ELF_STUB";
+                let sexos_binary = foreplay_player::embed_pack_trailer(sexos_stub, &archive_bytes);
+                bundle_files.insert("game.bin".into(), sexos_binary.clone());
+                bundle_files.insert(format!("{pkg_name}.bin"), sexos_binary);
             }
 
             ExportTarget::ThreeJsWebProject => {
@@ -370,6 +396,25 @@ impl ProjectExporter {
             bundle_files,
         })
     }
+}
+
+/// Reads a binary from disk and verifies its embedded `.fpck` package and table of contents.
+pub fn verify_self_contained_export_binary(
+    exe_path: &std::path::Path,
+) -> Result<BTreeMap<String, Vec<u8>>, ExportError> {
+    let bytes = std::fs::read(exe_path)
+        .map_err(|e| ExportError::EmbeddedPack(format!("failed to read executable at {}: {e}", exe_path.display())))?;
+    verify_self_contained_export_bytes(&bytes)
+}
+
+/// Verifies an in-memory binary containing an embedded `FPCKEXEC` package and table of contents.
+pub fn verify_self_contained_export_bytes(
+    exe_bytes: &[u8],
+) -> Result<BTreeMap<String, Vec<u8>>, ExportError> {
+    let pack_bytes = foreplay_player::extract_embedded_pack_from_bytes(exe_bytes)?
+        .ok_or_else(|| ExportError::EmbeddedPack("missing FPCKEXEC embedded pack trailer".into()))?;
+    let files = FpckArchive::unpack_bytes(&pack_bytes)?;
+    Ok(files)
 }
 
 fn sanitize_filename(name: &str) -> String {
@@ -457,5 +502,84 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn windows_export_is_valid_fpckexec_binary() {
+        let cfg = test_config();
+        let out = ProjectExporter::export_project(&cfg, ExportTarget::WindowsX64).unwrap();
+        let exe_bytes = out.bundle_files.get("game.exe").expect("game.exe present");
+        let unpacked = verify_self_contained_export_bytes(exe_bytes).expect("verification succeeds");
+        assert!(unpacked.contains_key("scenes/main.tscn"));
+        assert!(unpacked.contains_key("scripts/skater.gd"));
+        assert!(unpacked.contains_key("project.foreplay"));
+    }
+
+    #[test]
+    fn linux_export_contains_valid_fpckexec_runner() {
+        let cfg = test_config();
+        let out = ProjectExporter::export_project(&cfg, ExportTarget::LinuxSteamDeckX64).unwrap();
+        let runner_bytes = out.bundle_files.get("foreplay_runner").expect("foreplay_runner present");
+        let unpacked = verify_self_contained_export_bytes(runner_bytes).expect("verification succeeds");
+        assert!(unpacked.contains_key("scenes/main.tscn"));
+        assert!(unpacked.contains_key("scripts/skater.gd"));
+        assert!(unpacked.contains_key("project.foreplay"));
+    }
+
+    #[test]
+    fn macos_app_contains_valid_fpckexec_binary() {
+        let cfg = test_config();
+        let out = ProjectExporter::export_project(&cfg, ExportTarget::MacOsAppBundle).unwrap();
+        let mac_binary_key = format!("{}/Contents/MacOS/foreplay_mac", out.primary_artifact);
+        let mac_bytes = out.bundle_files.get(&mac_binary_key).expect("foreplay_mac present");
+        let unpacked = verify_self_contained_export_bytes(mac_bytes).expect("verification succeeds");
+        assert!(unpacked.contains_key("scenes/main.tscn"));
+        assert!(unpacked.contains_key("scripts/skater.gd"));
+        assert!(unpacked.contains_key("project.foreplay"));
+    }
+
+    #[test]
+    fn sexos_export_contains_valid_fpckexec_binary() {
+        let cfg = test_config();
+        let out = ProjectExporter::export_project(&cfg, ExportTarget::SexOsPackage).unwrap();
+        let bin_bytes = out.bundle_files.get("game.bin").expect("game.bin present");
+        let unpacked = verify_self_contained_export_bytes(bin_bytes).expect("verification succeeds");
+        assert!(unpacked.contains_key("scenes/main.tscn"));
+        assert!(unpacked.contains_key("scripts/skater.gd"));
+        assert!(unpacked.contains_key("project.foreplay"));
+    }
+
+    #[test]
+    fn tampered_fpckexec_export_binary_fails_verification() {
+        let cfg = test_config();
+        let out = ProjectExporter::export_project(&cfg, ExportTarget::WindowsX64).unwrap();
+        let mut exe_bytes = out.bundle_files["game.exe"].clone();
+        // Tamper with byte inside the package section (offset 25 is after b"MZ_FOREPLAY_STUB_EXE")
+        exe_bytes[25] ^= 0xAA;
+        let err = verify_self_contained_export_bytes(&exe_bytes).expect_err("tampering detected");
+        assert!(matches!(err, ExportError::EmbeddedPack(_)));
+    }
+
+    #[test]
+    fn verify_self_contained_export_binary_disk_roundtrip() {
+        let cfg = test_config();
+        let out = ProjectExporter::export_project(&cfg, ExportTarget::LinuxSteamDeckX64).unwrap();
+        let runner_bytes = &out.bundle_files["foreplay_runner"];
+
+        let temp_dir = std::env::temp_dir();
+        let temp_exe = temp_dir.join(format!(
+            "foreplay_test_runner_{}.bin",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&temp_exe, runner_bytes).expect("write temp runner");
+
+        let unpacked = verify_self_contained_export_binary(&temp_exe).expect("disk verification succeeds");
+        assert!(unpacked.contains_key("scenes/main.tscn"));
+        assert!(unpacked.contains_key("scripts/skater.gd"));
+
+        let _ = std::fs::remove_file(&temp_exe);
     }
 }

@@ -96,6 +96,16 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
             app.preview_camera = !app.preview_camera;
         }
 
+        ui.separator();
+
+        let adapter_summary = app.adapter_summary();
+        let is_hw = app.render_device.as_ref().is_some_and(|d| d.is_hardware_accelerated());
+        ui.colored_label(
+            if is_hw { COLOR_SUCCESS_GREEN } else { COLOR_WARN_YELLOW },
+            if is_hw { "⚡ wgpu Hardware" } else { "🖥 wgpu Fallback" },
+        )
+        .on_hover_text(format!("Graphics Adapter: {adapter_summary}"));
+
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.button("⟲ Reset Camera").clicked() {
                 app.camera_3d = Default::default();
@@ -621,6 +631,16 @@ fn draw_hud_overlay(painter: &egui::Painter, rect: Rect, app: &ForeplayEditorApp
         FontId::proportional(10.0),
         COLOR_WARN_YELLOW,
     );
+    text_y += 16.0;
+
+    let adapter_summary = app.adapter_summary();
+    painter.text(
+        Pos2::new(text_x, text_y),
+        Align2::LEFT_TOP,
+        format!("GPU: {adapter_summary}"),
+        FontId::proportional(9.5),
+        COLOR_TEXT_MUTED,
+    );
 }
 
 fn get_vec3_prop(node: &foreplay_ir::IrNode, key: &str) -> Option<Vec3> {
@@ -630,7 +650,7 @@ fn get_vec3_prop(node: &foreplay_ir::IrNode, key: &str) -> Option<Vec3> {
     }
 }
 
-fn draw_pbr_agx_viewport(app: &ForeplayEditorApp, painter: &egui::Painter, rect: Rect) {
+fn draw_pbr_agx_viewport(app: &mut ForeplayEditorApp, painter: &egui::Painter, rect: Rect) {
     let forward = app.camera_3d.forward();
     let rot = bevy_math::Quat::from_rotation_arc(Vec3::NEG_Z, forward);
     let cam = foreplay_render::PerspectiveCamera3D {
@@ -641,41 +661,59 @@ fn draw_pbr_agx_viewport(app: &ForeplayEditorApp, painter: &egui::Painter, rect:
         near: 0.1,
         far: 1000.0,
     };
-    let mut meshes = Vec::new();
-    let nodes = &app.session.tree.active_scene.nodes;
-    for node in nodes.values() {
-        let pos = get_vec3_prop(node, "position").unwrap_or(Vec3::ZERO);
-        let scale = get_vec3_prop(node, "scale").unwrap_or(Vec3::ONE);
-        let color = if let Some(IrValue::Color(c)) = node.properties.get("color") {
-            [c[0], c[1], c[2]]
-        } else {
-            [0.37, 0.51, 1.0]
-        };
-        let mat = foreplay_render::pbr_gi::PbrMaterialDesc::dielectric(color, 0.35);
-        let model_matrix = bevy_math::Mat4::from_scale_rotation_translation(scale, bevy_math::Quat::IDENTITY, pos);
-        let mesh = foreplay_render::pbr_gi::RenderTriangleMesh::new_cube(1.0, mat, model_matrix);
-        meshes.push(mesh);
-    }
 
-    let pbr_w = 160;
-    let pbr_h = 100;
-    let params = foreplay_render::pbr_gi::PbrViewportParams {
-        width: pbr_w,
-        height: pbr_h,
-        camera: &cam,
-        meshes: &meshes,
-        sun_dir: Vec3::new(-0.5, -1.0, -0.5).normalize_or_zero(),
-        sun_color: [1.0, 0.95, 0.85],
-        sun_intensity: 3.5,
-        sky_color: [0.05, 0.06, 0.08],
-        voxel_gi: None,
-        radiance_cascade: None,
-        selected_mesh_index: None,
-        outline_color: [255, 140, 0, 255],
-        outline_width: 2,
-        enable_shadows: true,
+    let pbr_w = 160u32;
+    let pbr_h = 100u32;
+
+    let rgba_buffer = if let Some(dev) = &mut app.render_device {
+        let mut draw_items = Vec::new();
+        for node in app.session.tree.active_scene.nodes.values() {
+            let pos = get_vec3_prop(node, "position").unwrap_or(Vec3::ZERO);
+            let scale = get_vec3_prop(node, "scale").unwrap_or(Vec3::ONE);
+            let color = if let Some(IrValue::Color(c)) = node.properties.get("color") {
+                [c[0], c[1], c[2], c[3]]
+            } else {
+                [0.37, 0.51, 1.0, 1.0]
+            };
+            let model_matrix = bevy_math::Mat4::from_scale_rotation_translation(scale, bevy_math::Quat::IDENTITY, pos);
+            let item = foreplay_render::HardwareDrawItem3D::new_cube(1.0, model_matrix, color, 0.35, 0.0);
+            draw_items.push(item);
+        }
+        let sun = foreplay_render::HardwareLight3D {
+            light_type: foreplay_render::HardwareLightType::Directional,
+            direction: [-0.5, -1.0, -0.5],
+            position: [0.0, 20.0, 0.0],
+            color: [1.0, 0.95, 0.85],
+            energy: 3.5,
+            range: 500.0,
+            cast_shadows: true,
+        };
+        match dev.render_scene_offscreen_rgba(pbr_w, pbr_h, &cam, &draw_items, &[sun], &[]) {
+            Ok(output) => output.rgba8,
+            Err(_) => {
+                let params = foreplay_render::pbr_gi::PbrViewportParams {
+                    width: pbr_w,
+                    height: pbr_h,
+                    camera: &cam,
+                    meshes: &[],
+                    sun_dir: Vec3::new(-0.5, -1.0, -0.5).normalize_or_zero(),
+                    sun_color: [1.0, 0.95, 0.85],
+                    sun_intensity: 3.5,
+                    sky_color: [0.05, 0.06, 0.08],
+                    voxel_gi: None,
+                    radiance_cascade: None,
+                    selected_mesh_index: None,
+                    outline_color: [255, 140, 0, 255],
+                    outline_width: 2,
+                    enable_shadows: true,
+                };
+                foreplay_render::pbr_gi::render_shaded_pbr_viewport_rgba8(&params)
+            }
+        }
+    } else {
+        vec![0u8; (pbr_w * pbr_h * 4) as usize]
     };
-    let rgba_buffer = foreplay_render::pbr_gi::render_shaded_pbr_viewport_rgba8(&params);
+
     let color_img = egui::ColorImage::from_rgba_unmultiplied([pbr_w as usize, pbr_h as usize], &rgba_buffer);
     let tex = painter.ctx().load_texture("viewport_pbr_agx", color_img, egui::TextureOptions::LINEAR);
     painter.image(tex.id(), rect, Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)), Color32::WHITE);

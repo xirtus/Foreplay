@@ -99,6 +99,10 @@ impl HarnessRpcServer {
             "foreplay/export_fscn" => Self::handle_export_fscn(session),
             "foreplay/export_threejs" => Self::handle_export_threejs(session, params),
             "foreplay/import_threejs" => Self::handle_import_threejs(session, params),
+            "foreplay/lsp_complete" => Self::handle_lsp_complete(params),
+            "foreplay/import_glb" => Self::handle_import_glb(session, params),
+            "foreplay/classdb_query" => Self::handle_classdb_query(params),
+            "foreplay/verify_all_gates" => Self::handle_verify_all_gates(),
             _ => Err(RpcError::method_not_found(method)),
         }
     }
@@ -816,6 +820,164 @@ impl HarnessRpcServer {
             "feel_knobs_count": feel_knobs_count
         }))
     }
+
+    fn handle_lsp_complete(params: &Value) -> Result<Value, RpcError> {
+        let source = params
+            .get("source")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let line = params
+            .get("line")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1) as usize;
+        let col = params
+            .get("col")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+
+        let analyzer = foreplay_gdscript::GdLspAnalyzer::new();
+        let completions = analyzer.complete_at(source, line, col);
+        let hover = analyzer.hover_at(source, line, col);
+        let analysis = analyzer.analyze_document("res://active.gd", source);
+
+        let items_json: Vec<Value> = completions
+            .iter()
+            .map(|item| {
+                json!({
+                    "label": item.label,
+                    "kind": format!("{:?}", item.kind),
+                    "detail": item.detail,
+                    "documentation": item.documentation,
+                    "insert_text": item.insert_text,
+                })
+            })
+            .collect();
+
+        Ok(json!({
+            "completions": items_json,
+            "hover": hover.map(|h| h.contents),
+            "diagnostics_count": analysis.diagnostics.len(),
+            "symbols_count": analysis.symbols.len(),
+            "executable_lines_count": analysis.executable_lines.len()
+        }))
+    }
+
+    fn handle_import_glb(session: &mut HarnessSession, params: &Value) -> Result<Value, RpcError> {
+        let scene_name = params
+            .get("scene_name")
+            .and_then(|v| v.as_str());
+
+        let glb_bytes = if let Some(hex_str) = params.get("glb_hex").and_then(|v| v.as_str()) {
+            let mut bytes = Vec::new();
+            let mut chars = hex_str.chars();
+            while let (Some(c1), Some(c2)) = (chars.next(), chars.next()) {
+                if let Ok(byte) = u8::from_str_radix(&format!("{c1}{c2}"), 16) {
+                    bytes.push(byte);
+                }
+            }
+            bytes
+        } else {
+            foreplay_porthost::build_sample_rigged_character_glb()
+        };
+
+        let bundle = foreplay_porthost::import_glb_bytes_to_ir(&glb_bytes, scene_name)
+            .map_err(|e| RpcError::internal(format!("GLB import failed: {e}")))?;
+
+        let node_count = bundle.scene.nodes.len();
+        let skins_count = bundle.skins.len();
+        let anims_count = bundle.animations.len();
+        let scene_name_res = bundle.scene.name.clone();
+
+        session.tree.active_scene = bundle.scene;
+        session.tree.rebuild_world_from_ir();
+
+        Ok(json!({
+            "success": true,
+            "scene_name": scene_name_res,
+            "node_count": node_count,
+            "skins_count": skins_count,
+            "animations_count": anims_count
+        }))
+    }
+
+    fn handle_classdb_query(params: &Value) -> Result<Value, RpcError> {
+        let class_db = foreplay_core::ClassDb::global_godot44();
+        let total_classes = class_db.class_count();
+
+        if let Some(target_class) = params.get("class_name").and_then(|v| v.as_str()) {
+            if let Some(info) = class_db.get(target_class) {
+                return Ok(json!({
+                    "found": true,
+                    "name": info.name,
+                    "parent": info.parent,
+                    "is_instantiable": info.is_instantiable,
+                    "default_properties": info.default_properties,
+                    "signals": info.signals,
+                    "total_classes": total_classes
+                }));
+            } else {
+                return Ok(json!({
+                    "found": false,
+                    "class_name": target_class,
+                    "total_classes": total_classes
+                }));
+            }
+        }
+
+        let filter_ancestor = params.get("filter").and_then(|v| v.as_str()).unwrap_or("Object");
+        let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+
+        let matching_names = class_db.subclasses_of(filter_ancestor);
+        let items: Vec<Value> = matching_names
+            .iter()
+            .take(limit)
+            .filter_map(|name| {
+                let info = class_db.get(name)?;
+                Some(json!({
+                    "name": info.name,
+                    "parent": info.parent,
+                    "is_instantiable": info.is_instantiable,
+                    "signal_count": info.signals.len(),
+                    "default_property_count": info.default_properties.len(),
+                }))
+            })
+            .collect();
+
+        Ok(json!({
+            "filter": filter_ancestor,
+            "total_matches": matching_names.len(),
+            "limit": limit,
+            "classes": items,
+            "total_classdb_count": total_classes
+        }))
+    }
+
+    fn handle_verify_all_gates() -> Result<Value, RpcError> {
+        let report = crate::gates::run_all_verification_gates();
+        let gates_json: Vec<Value> = report
+            .gates
+            .iter()
+            .map(|g| {
+                json!({
+                    "gate_number": g.gate_number,
+                    "name": g.name,
+                    "description": g.description,
+                    "passed": g.passed,
+                    "details": g.details,
+                    "duration_ms": g.duration_ms,
+                })
+            })
+            .collect();
+
+        Ok(json!({
+            "all_passed": report.all_passed(),
+            "total_gates": report.total_gates,
+            "passed_gates": report.passed_gates,
+            "failed_gates": report.failed_gates,
+            "total_duration_ms": report.total_duration_ms,
+            "gates": gates_json,
+        }))
+    }
 }
 
 fn parse_node_id_val(v: &Value) -> Option<NodeId> {
@@ -1251,5 +1413,71 @@ mod tests {
         let export_three_target_val: Value = serde_json::from_str(&export_three_target_res).unwrap();
         assert_eq!(export_three_target_val["result"]["success"], true);
         assert_eq!(export_three_target_val["result"]["primary_artifact"], "package.json");
+
+        // 11. LSP Complete RPC
+        let lsp_res = HarnessRpcServer::handle_json(
+            &mut session,
+            r#"{
+                "jsonrpc": "2.0",
+                "id": 40,
+                "method": "foreplay/lsp_complete",
+                "params": {
+                    "source": "var x = Vector3.",
+                    "line": 1,
+                    "col": 16
+                }
+            }"#,
+        );
+        let lsp_val: Value = serde_json::from_str(&lsp_res).unwrap();
+        assert!(lsp_val["result"]["completions"].as_array().is_some_and(|arr| !arr.is_empty()));
+
+        // 12. ClassDB Query RPC
+        let classdb_res = HarnessRpcServer::handle_json(
+            &mut session,
+            r#"{
+                "jsonrpc": "2.0",
+                "id": 41,
+                "method": "foreplay/classdb_query",
+                "params": {
+                    "class_name": "CharacterBody3D"
+                }
+            }"#,
+        );
+        let classdb_val: Value = serde_json::from_str(&classdb_res).unwrap();
+        assert_eq!(classdb_val["result"]["found"], true);
+        assert_eq!(classdb_val["result"]["name"], "CharacterBody3D");
+        assert_eq!(classdb_val["result"]["parent"], "PhysicsBody3D");
+
+        // 13. Import GLB RPC (Sample Rigged Character)
+        let glb_res = HarnessRpcServer::handle_json(
+            &mut session,
+            r#"{
+                "jsonrpc": "2.0",
+                "id": 42,
+                "method": "foreplay/import_glb",
+                "params": {
+                    "scene_name": "GlbRpcHero"
+                }
+            }"#,
+        );
+        let glb_val: Value = serde_json::from_str(&glb_res).unwrap();
+        assert_eq!(glb_val["result"]["success"], true);
+        assert_eq!(glb_val["result"]["scene_name"], "GlbRpcHero");
+        assert!(glb_val["result"]["node_count"].as_u64().unwrap() >= 1);
+
+        // 14. Verify All Gates RPC
+        let gates_res = HarnessRpcServer::handle_json(
+            &mut session,
+            r#"{
+                "jsonrpc": "2.0",
+                "id": 43,
+                "method": "foreplay/verify_all_gates",
+                "params": {}
+            }"#,
+        );
+        let gates_val: Value = serde_json::from_str(&gates_res).unwrap();
+        assert_eq!(gates_val["result"]["all_passed"], true);
+        assert_eq!(gates_val["result"]["total_gates"], 8);
+        assert_eq!(gates_val["result"]["passed_gates"], 8);
     }
 }

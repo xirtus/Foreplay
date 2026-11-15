@@ -4,11 +4,15 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "MPL-2.0"
-description = "PhysicsServer2D/3D with live hotswapping between Rapier and faithful game-port physics"
+description = "PhysicsServer2D/3D with live hotswapping between production Rapier (2D/3D) and faithful game-port physics"
 
 [dependencies]
 foreplay-ir = { path = "../foreplay-ir" }
 bevy_math = { workspace = true }
+rapier2d = { workspace = true }
+rapier3d = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true

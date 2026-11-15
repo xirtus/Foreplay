@@ -4,21 +4,27 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "GPL-3.0-only"
-description = "3JSE-style AI Agent API / MCP server, Undo/Redo journal, and headless verification gates"
+description = "3JSE-style AI Agent API / MCP server, Undo/Redo journal, and 8-Gate headless verification harness"
 
 [dependencies]
 foreplay-ir = { path = "../foreplay-ir" }
 foreplay-core = { path = "../foreplay-core" }
+foreplay-render = { path = "../foreplay-render" }
+foreplay-physics = { path = "../foreplay-physics" }
+foreplay-audio = { path = "../foreplay-audio" }
+foreplay-platform = { path = "../foreplay-platform" }
 foreplay-atlas = { path = "../foreplay-atlas" }
 foreplay-porthost = { path = "../foreplay-porthost" }
 foreplay-gdscript = { path = "../foreplay-gdscript" }
+foreplay-gdext = { path = "../foreplay-gdext" }
 foreplay-script = { path = "../foreplay-script" }
 foreplay-export = { path = "../foreplay-export" }
+foreplay-player = { path = "../foreplay-player" }
 foreplay-threejs = { path = "../foreplay-threejs" }
+bevy_math = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [lints]
 workspace = true
-

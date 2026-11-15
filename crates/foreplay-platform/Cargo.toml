@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "MPL-2.0"
-description = "Cross-platform host bridge for Linux/Wayland/SteamDeck, macOS, Windows, WebGPU, and SexOS (Silk/egui)"
+description = "Cross-platform host bridge for Linux/Wayland/SteamDeck, macOS, Windows, WebGPU, SexOS, gilrs gamepads, and Godot InputMap"
 
 [features]
 default = ["desktop-host"]
@@ -14,6 +14,10 @@ webgpu-browser = []
 
 [dependencies]
 foreplay-ir = { path = "../foreplay-ir" }
+gilrs = { workspace = true }
+winit = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true

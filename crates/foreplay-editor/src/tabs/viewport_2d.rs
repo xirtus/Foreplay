@@ -66,6 +66,16 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
             ui.separator();
         }
 
+        ui.separator();
+
+        let adapter_summary = app.adapter_summary();
+        let is_hw = app.render_device.as_ref().is_some_and(|d| d.is_hardware_accelerated());
+        ui.colored_label(
+            if is_hw { COLOR_SUCCESS_GREEN } else { COLOR_WARN_YELLOW },
+            if is_hw { "⚡ wgpu 2D Pipeline" } else { "🖥 2D Fallback Pipeline" },
+        )
+        .on_hover_text(format!("Graphics Adapter: {adapter_summary}"));
+
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.button("⟲ Reset 2D View").clicked() {
                 app.camera_2d = Default::default();
@@ -207,7 +217,7 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
     }
 
     // 5. HUD overlay
-    let hud_rect = Rect::from_min_size(rect.min + Vec2::new(12.0, 12.0), Vec2::new(220.0, 56.0));
+    let hud_rect = Rect::from_min_size(rect.min + Vec2::new(12.0, 12.0), Vec2::new(260.0, 72.0));
     painter.rect_filled(hud_rect, 4.0, Color32::from_rgba_unmultiplied(26, 29, 36, 220));
     painter.rect_stroke(hud_rect, 4.0, Stroke::new(1.0, COLOR_BORDER), egui::StrokeKind::Inside);
     painter.text(
@@ -219,11 +229,19 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
     );
     let snap_status = if app.snap_2d_grid { "Grid 16px" } else if app.snap_2d_pixel { "Pixel" } else { "Off" };
     painter.text(
-        hud_rect.min + Vec2::new(8.0, 28.0),
+        hud_rect.min + Vec2::new(8.0, 26.0),
         Align2::LEFT_TOP,
         format!("Zoom: {:.1}x | Snap: {snap_status} | Nodes: {}", app.camera_2d.zoom, nodes.len()),
         FontId::proportional(11.0),
         COLOR_TEXT_MUTED,
+    );
+    let adapter_summary = app.adapter_summary();
+    painter.text(
+        hud_rect.min + Vec2::new(8.0, 46.0),
+        Align2::LEFT_TOP,
+        format!("GPU: {adapter_summary}"),
+        FontId::proportional(9.5),
+        COLOR_TEXT_NORMAL,
     );
 }
 

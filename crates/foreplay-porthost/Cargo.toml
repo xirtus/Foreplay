@@ -4,14 +4,16 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "GPL-3.0-only"
-description = "BYO-ROM retail archive mount (port://), RustPorts wave runner, and frame-by-frame Differential Oracle"
+description = "BYO-ROM retail archive mount (port://), Godot .tscn/.tres, glTF 2.0 (.glb) rigged importer, threaded ResourceLoader, and Differential Oracle"
 
 [dependencies]
 foreplay-ir = { path = "../foreplay-ir" }
+gltf = { workspace = true }
+image = { workspace = true }
+bevy_math = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [lints]
 workspace = true
-

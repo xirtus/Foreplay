@@ -8,17 +8,25 @@
 //! - Godot `ClassDB` / `@export` -> `bevy_reflect::Reflect` + `foreplay_ir::FeelSpecKnob`
 
 pub mod animation;
+pub mod anim_tree;
+pub mod classdb;
 pub mod ik_motion;
 pub mod navigation;
 pub mod pcg;
 pub mod rollback;
+pub mod text_server;
+pub mod tilemap_terrain;
 pub mod ui_layout;
 
 pub use animation::*;
+pub use anim_tree::*;
+pub use classdb::*;
 pub use ik_motion::*;
 pub use navigation::*;
 pub use pcg::*;
 pub use rollback::*;
+pub use text_server::*;
+pub use tilemap_terrain::*;
 pub use ui_layout::*;
 
 use bevy_ecs::hierarchy::ChildOf;
@@ -1164,5 +1172,418 @@ mod tests {
         assert!((offset0.x - 0.1).abs() < 1e-4);
         blend.evaluate(0.21);
         assert!(blend.is_finished());
+    }
+
+    // =========================================================================
+    // Milestone M2-A (Phase 13.1) Comprehensive Unit Tests
+    // =========================================================================
+
+    #[test]
+    fn test_classdb_class_count_exceeds_265() {
+        let db = ClassDb::global_godot44();
+        assert!(
+            db.class_count() >= 265,
+            "ClassDB must contain at least 265 genuine Godot 4.4 classes (found {})",
+            db.class_count()
+        );
+    }
+
+    #[test]
+    fn test_classdb_inheritance_chain_and_negatives() {
+        let db = ClassDb::global_godot44();
+        // Sprite2D inheritance hierarchy: Sprite2D -> Node2D -> CanvasItem -> Node -> Object
+        assert!(db.inherits("Sprite2D", "Sprite2D"));
+        assert!(db.inherits("Sprite2D", "Node2D"));
+        assert!(db.inherits("Sprite2D", "CanvasItem"));
+        assert!(db.inherits("Sprite2D", "Node"));
+        assert!(db.inherits("Sprite2D", "Object"));
+
+        // Negative inheritance checks
+        assert!(!db.inherits("Sprite2D", "Node3D"));
+        assert!(!db.inherits("MeshInstance3D", "Control"));
+        assert!(!db.inherits("Button", "Node3D"));
+        assert!(!db.inherits("StandardMaterial3D", "Node"));
+        assert!(db.inherits("StandardMaterial3D", "Resource"));
+    }
+
+    #[test]
+    fn test_classdb_subclasses_query() {
+        let db = ClassDb::global_godot44();
+        let subs3d = db.subclasses_of("Node3D");
+        assert!(subs3d.contains(&"MeshInstance3D".to_string()));
+        assert!(subs3d.contains(&"Camera3D".to_string()));
+        assert!(subs3d.contains(&"Skeleton3D".to_string()));
+        assert!(subs3d.contains(&"CharacterBody3D".to_string()));
+        assert!(subs3d.contains(&"DirectionalLight3D".to_string()));
+        assert!(!subs3d.contains(&"Sprite2D".to_string()));
+
+        let control_subs = db.subclasses_of("Control");
+        assert!(control_subs.contains(&"Button".to_string()));
+        assert!(control_subs.contains(&"RichTextLabel".to_string()));
+        assert!(control_subs.contains(&"HBoxContainer".to_string()));
+    }
+
+    #[test]
+    fn test_classdb_instantiate_default_properties() {
+        let db = ClassDb::global_godot44();
+        let props = db.instantiate_default_properties("Camera3D").expect("instantiable");
+        assert!(props.contains_key("fov"));
+        assert!(props.contains_key("near"));
+        assert!(props.contains_key("far"));
+        assert!(props.contains_key("position"));
+        assert!(props.contains_key("rotation"));
+        assert!(props.contains_key("name"));
+
+        let uninstantiable = db.instantiate_default_properties("Node3D");
+        // Node3D is marked instantiable in Godot 4
+        assert!(uninstantiable.is_ok());
+
+        let abstract_res = db.instantiate_default_properties("Object");
+        assert!(abstract_res.is_err(), "Object is abstract and non-instantiable");
+    }
+
+    #[test]
+    fn test_classdb_dynamic_extension_registration() {
+        let mut db = ClassDb::global_godot44().clone();
+        let ext = ClassInfo::new("SkaterController3D", Some("CharacterBody3D"), true)
+            .with_property("deck_stiffness", IrValue::F64(8.5))
+            .with_signal("ollie_popped");
+
+        assert!(db.register_extension_class(ext.clone()).is_ok());
+        assert!(db.inherits("SkaterController3D", "CharacterBody3D"));
+        assert!(db.inherits("SkaterController3D", "Node3D"));
+        assert!(db.inherits("SkaterController3D", "Node"));
+
+        let props = db.instantiate_default_properties("SkaterController3D").unwrap();
+        assert_eq!(props.get("deck_stiffness"), Some(&IrValue::F64(8.5)));
+        assert!(props.contains_key("motion_mode")); // Inherited from CharacterBody3D
+
+        // Cannot duplicate registration
+        assert!(db.register_extension_class(ext).is_err());
+    }
+
+    #[test]
+    fn test_skeleton3d_hierarchical_evaluation_and_skin_matrices() {
+        let mut skel = Skeleton3D::new();
+
+        // Bone 0: Pelvis at (0, 10, 0)
+        let b0 = Bone3D::new("Pelvis", None)
+            .with_rest(bevy_math::Mat4::from_translation(bevy_math::Vec3::new(0.0, 10.0, 0.0)))
+            .with_inverse_bind(bevy_math::Mat4::from_translation(bevy_math::Vec3::new(0.0, -10.0, 0.0)));
+        skel.add_bone(b0);
+
+        // Bone 1: Spine at local (0, 5, 0) relative to Pelvis -> global (0, 15, 0)
+        let b1 = Bone3D::new("Spine", Some(0))
+            .with_rest(bevy_math::Mat4::from_translation(bevy_math::Vec3::new(0.0, 5.0, 0.0)))
+            .with_inverse_bind(bevy_math::Mat4::from_translation(bevy_math::Vec3::new(0.0, -15.0, 0.0)));
+        skel.add_bone(b1);
+
+        skel.evaluate_global_poses();
+        assert_eq!(skel.bones[0].global_pose.w_axis.truncate(), bevy_math::Vec3::new(0.0, 10.0, 0.0));
+        assert_eq!(skel.bones[1].global_pose.w_axis.truncate(), bevy_math::Vec3::new(0.0, 15.0, 0.0));
+
+        // Skin matrices at rest with exact inverse bind should be identity
+        let skin_mats = skel.compute_skin_matrices();
+        assert!((skin_mats[0] - bevy_math::Mat4::IDENTITY).abs_diff_eq(bevy_math::Mat4::ZERO, 1e-4));
+        assert!((skin_mats[1] - bevy_math::Mat4::IDENTITY).abs_diff_eq(bevy_math::Mat4::ZERO, 1e-4));
+
+        // Posing Pelvis with +2 translation along X
+        skel.set_bone_pose(0, bevy_math::Mat4::from_translation(bevy_math::Vec3::new(2.0, 0.0, 0.0)));
+        let skin_mats_posed = skel.compute_skin_matrices();
+        assert_eq!(skin_mats_posed[0].w_axis.truncate(), bevy_math::Vec3::new(2.0, 0.0, 0.0));
+        assert_eq!(skin_mats_posed[1].w_axis.truncate(), bevy_math::Vec3::new(2.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn test_anim_node_blend2_filtering() {
+        let node_a = AnimationTreeNode::Animation(AnimationNodeAnimation::new("Idle"));
+        let node_b = AnimationTreeNode::Animation(AnimationNodeAnimation::new("Shoot"));
+        let mut blend = AnimationNodeBlend2::new(node_a, node_b).with_filter(["ArmRight", "HandRight"]);
+        blend.blend_amount = 0.75;
+
+        assert_eq!(blend.blend_weight_for_bone("ArmRight"), 0.75);
+        assert_eq!(blend.blend_weight_for_bone("HandRight"), 0.75);
+        assert_eq!(blend.blend_weight_for_bone("LegLeft"), 0.0);
+    }
+
+    #[test]
+    fn test_anim_node_oneshot_lifecycle() {
+        let base = AnimationTreeNode::Animation(AnimationNodeAnimation::new("Run"));
+        let shot = AnimationTreeNode::Animation(AnimationNodeAnimation::new("Attack"));
+        let mut oneshot = AnimationNodeOneShot::new(base, shot, 0.2, 0.5, 0.3);
+
+        assert_eq!(oneshot.current_weight(), 0.0);
+        oneshot.fire();
+        assert!(oneshot.active);
+
+        // Halfway through fade_in (0.1s of 0.2s)
+        let w1 = oneshot.advance(0.1);
+        assert!((w1 - 0.5).abs() < 1e-4);
+
+        // During hold (0.1s + 0.2s = 0.3s -> within hold)
+        let w2 = oneshot.advance(0.2);
+        assert_eq!(w2, 1.0);
+
+        // In fade_out (total 0.85s -> 0.15s into 0.3s fade_out)
+        let w3 = oneshot.advance(0.55);
+        assert!((w3 - 0.5).abs() < 1e-3);
+
+        // Past completion
+        let w4 = oneshot.advance(0.3);
+        assert_eq!(w4, 0.0);
+        assert!(!oneshot.active);
+    }
+
+    #[test]
+    fn test_anim_node_blendspace1d_interpolation() {
+        let mut bs = AnimationNodeBlendSpace1D::new();
+        bs.add_point(0.0, "Idle");
+        bs.add_point(2.0, "Walk");
+        bs.add_point(6.0, "Run");
+
+        // Middle of Idle -> Walk
+        let sample1 = bs.sample(1.0);
+        assert_eq!(sample1.len(), 2);
+        assert_eq!(sample1[0], ("Idle".to_string(), 0.5));
+        assert_eq!(sample1[1], ("Walk".to_string(), 0.5));
+
+        // Boundary clamp
+        let sample_min = bs.sample(-5.0);
+        assert_eq!(sample_min, vec![("Idle".to_string(), 1.0)]);
+        let sample_max = bs.sample(10.0);
+        assert_eq!(sample_max, vec![("Run".to_string(), 1.0)]);
+    }
+
+    #[test]
+    fn test_anim_node_blendspace2d_barycentric() {
+        let mut bs = AnimationNodeBlendSpace2D::new();
+        let i0 = bs.add_point([0.0, 0.0], "Idle");
+        let i1 = bs.add_point([1.0, 0.0], "StrafeRight");
+        let i2 = bs.add_point([0.0, 1.0], "RunForward");
+        bs.add_triangle(i0, i1, i2);
+
+        // Exact match on corner
+        let exact = bs.sample_barycentric([1.0, 0.0]);
+        assert_eq!(exact, vec![("StrafeRight".to_string(), 1.0)]);
+
+        // Center of triangle [0.25, 0.25]
+        let blended = bs.sample_barycentric([0.25, 0.25]);
+        let total_weight: f32 = blended.iter().map(|(_, w)| *w).sum();
+        assert!((total_weight - 1.0).abs() < 1e-4);
+        assert_eq!(blended.len(), 3);
+    }
+
+    #[test]
+    fn test_anim_state_machine_crossfade_and_auto_advance() {
+        let mut sm = AnimationNodeStateMachine::new();
+        sm.add_state("Idle", "clip_idle");
+        sm.add_state("Run", "clip_run");
+
+        let mut trans = StateTransition::new("Idle", "Run", 0.4);
+        trans.advance_condition = Some("is_moving".into());
+        sm.add_transition(trans);
+
+        let mut params = BTreeMap::new();
+        params.insert("is_moving".into(), IrValue::Bool(false));
+
+        // Idle state, condition false -> stay in Idle
+        let w0 = sm.advance(0.016, &params);
+        assert_eq!(w0, vec![("clip_idle".to_string(), 1.0)]);
+
+        // Trigger condition
+        params.insert("is_moving".into(), IrValue::Bool(true));
+        let w1 = sm.advance(0.2, &params); // 0.2s / 0.4s xfade -> 50% prev, 50% curr
+        assert_eq!(w1.len(), 2);
+        assert!((w1[0].1 - 0.5).abs() < 1e-2);
+        assert!((w1[1].1 - 0.5).abs() < 1e-2);
+
+        // Finish crossfade
+        let w2 = sm.advance(0.25, &params);
+        assert_eq!(w2, vec![("clip_run".to_string(), 1.0)]);
+    }
+
+    #[test]
+    fn test_text_server_shaping_and_metrics() {
+        let mut server = TextServer::new();
+        let buffer = server.shape_text("Foreplay Engine TextServer", 18.0, 24.0, None);
+        assert_eq!(buffer.lines.len(), 1);
+        let mut glyph_count = 0;
+        for run in buffer.layout_runs() {
+            glyph_count += run.glyphs.len();
+        }
+        assert!(glyph_count > 0, "Shaped buffer must produce layout glyphs");
+    }
+
+    #[test]
+    fn test_text_server_multiline_word_wrap() {
+        let mut server = TextServer::new();
+        let long_text = "This is a long sentence that should definitely be wrapped across multiple lines because of the narrow boundary.";
+        let buffer = server.shape_text(long_text, 16.0, 20.0, Some(100.0));
+        let line_count = buffer.layout_runs().count();
+        assert!(line_count > 1, "Buffer with max_width=100 must wrap into multiple lines (got {line_count})");
+    }
+
+    #[test]
+    fn test_text_server_cursor_hit_test() {
+        let mut server = TextServer::new();
+        let buffer = server.shape_text("Editable Text", 16.0, 20.0, None);
+        let hit = server.hit_test(&buffer, 25.0, 10.0);
+        assert!(hit.is_some(), "Hit testing at valid text coordinate must return a Cursor");
+    }
+
+    #[test]
+    fn test_text_server_rasterize_rgba() {
+        let mut server = TextServer::new();
+        let buffer = server.shape_text("A", 24.0, 28.0, None);
+        let width = 64;
+        let height = 64;
+        let rgba = server.rasterize_shaped_text_rgba(&buffer, width, height);
+        assert_eq!(rgba.len(), (width * height * 4) as usize);
+        let non_zero_alpha = rgba.chunks(4).any(|p| p[3] > 0);
+        assert!(non_zero_alpha, "Rasterized bitmap must contain visible alpha glyph pixels");
+    }
+
+    #[test]
+    fn test_bbcode_rich_text_parser_all_tags() {
+        let bbcode = "[b]Bold[/b] [i]Italic[/i] [u]Under[/u] [s]Strike[/s] [code]Code[/code] [color=#ff0000]Red[/color] [font_size=28]Big[/font_size] [center]Centered[/center] [url=https://sexos.dev]SexOS[/url] [img]res://tex.png[/img]";
+        let parsed = BbCodeRichText::parse(bbcode);
+
+        assert_eq!(
+            parsed.to_plain_text(),
+            "Bold Italic Under Strike Code Red Big Centered SexOS "
+        );
+        assert!(parsed.spans.iter().any(|s| s.bold));
+        assert!(parsed.spans.iter().any(|s| s.italic));
+        assert!(parsed.spans.iter().any(|s| s.underline));
+        assert!(parsed.spans.iter().any(|s| s.strikethrough));
+        assert!(parsed.spans.iter().any(|s| s.monospace));
+        assert!(parsed.spans.iter().any(|s| s.color == Some([255, 0, 0, 255])));
+        assert!(parsed.spans.iter().any(|s| s.font_size == Some(28.0)));
+        assert!(parsed.spans.iter().any(|s| s.url == Some("https://sexos.dev".to_string())));
+        assert!(parsed.spans.iter().any(|s| s.image_path == Some("res://tex.png".to_string())));
+    }
+
+    #[test]
+    fn test_bbcode_animated_wave_and_shake() {
+        let bbcode = "[wave amp=15.0 freq=2.0]Wavy[/wave] [shake rate=20.0 level=4.0]Shaky[/shake]";
+        let parsed = BbCodeRichText::parse(bbcode);
+
+        let offsets_t1 = parsed.evaluate_effects(0.25);
+        assert!(!offsets_t1.is_empty(), "Wave/shake spans must generate per-glyph offsets");
+
+        // Wave displacement at t=0.25 must be non-zero
+        let wave_glyph = offsets_t1.iter().find(|o| o.glyph_index < 4).unwrap();
+        assert!(wave_glyph.dy.abs() > 0.0);
+
+        // Shake displacement should be bounded by level=4.0
+        for off in &offsets_t1 {
+            assert!(off.dx.abs() <= 5.0 && off.dy.abs() <= 16.0);
+        }
+    }
+
+    #[test]
+    fn test_tilemap_terrain_match_corners_and_sides() {
+        let mut catalog = TileSetTerrainCatalog::new();
+        let mut set = TerrainSet::new(TerrainMode::MatchCornersAndSides);
+        let grass_id = set.add_terrain("Grass");
+
+        // Center tile: surrounded by Grass in all 8 directions
+        let mut center_tile = TerrainTileDef::new(100, grass_id);
+        for dir in PeeringDirection::ALL {
+            center_tile = center_tile.with_peering(dir, grass_id);
+        }
+        set.add_tile(center_tile);
+
+        // Corner tile: Grass only on Right and Bottom
+        let corner_tile = TerrainTileDef::new(101, grass_id)
+            .with_peering(PeeringDirection::Right, grass_id)
+            .with_peering(PeeringDirection::Bottom, grass_id)
+            .with_peering(PeeringDirection::BottomRight, grass_id);
+        set.add_tile(corner_tile);
+
+        catalog.register_set(0, set);
+
+        let mut autotiler = TileMapTerrainAutotiler::new(catalog);
+        // Paint a 3x3 block of Grass
+        let mut block = Vec::new();
+        for x in 0..3 {
+            for y in 0..3 {
+                block.push((x, y));
+            }
+        }
+        autotiler.paint_terrain_connect(&block, 0, grass_id);
+
+        // The center cell (1, 1) has all 8 neighbors and must pick tile 100
+        assert_eq!(autotiler.get_tile(1, 1), Some(100));
+        // The top-left cell (0, 0) has neighbors to right and bottom and must pick corner tile 101
+        assert_eq!(autotiler.get_tile(0, 0), Some(101));
+    }
+
+    #[test]
+    fn test_tilemap_terrain_match_sides_and_corners() {
+        let mut catalog = TileSetTerrainCatalog::new();
+        let mut set = TerrainSet::new(TerrainMode::MatchSides);
+        let sand = set.add_terrain("Sand");
+
+        let tile_h = TerrainTileDef::new(200, sand)
+            .with_peering(PeeringDirection::Left, sand)
+            .with_peering(PeeringDirection::Right, sand);
+        set.add_tile(tile_h);
+
+        catalog.register_set(1, set);
+
+        let mut autotiler = TileMapTerrainAutotiler::new(catalog);
+        autotiler.paint_terrain_connect(&[(0, 0), (1, 0), (2, 0)], 1, sand);
+
+        // Middle horizontal cell has Left and Right neighbors
+        assert_eq!(autotiler.get_tile(1, 0), Some(200));
+    }
+
+    #[test]
+    fn test_tilemap_terrain_path_painting() {
+        let mut catalog = TileSetTerrainCatalog::new();
+        let mut set = TerrainSet::new(TerrainMode::MatchCornersAndSides);
+        let dirt = set.add_terrain("Dirt");
+        set.add_tile(TerrainTileDef::new(300, dirt));
+        catalog.register_set(2, set);
+
+        let mut autotiler = TileMapTerrainAutotiler::new(catalog);
+        // Paint path from (0, 0) to (4, 0)
+        autotiler.paint_terrain_path(&[(0, 0), (4, 0)], 2, dirt);
+
+        for x in 0..=4 {
+            assert_eq!(autotiler.get_terrain(x, 0), Some((2, dirt)));
+            assert_eq!(autotiler.get_tile(x, 0), Some(300));
+        }
+    }
+
+    #[test]
+    fn test_polygon2d_skinner_multi_bone_lbs() {
+        let mut skinner = Polygon2DSkinner::new();
+
+        // Bone 0: Root bone at (0, 0)
+        let b0 = Bone2DDef::new("Root", None);
+        skinner.add_bone(b0);
+
+        // Bone 1: Arm bone at rest translation (10, 0)
+        let b1 = Bone2DDef::new("Arm", Some(0))
+            .with_rest(Transform2D::from_translation(10.0, 0.0))
+            .with_inverse_bind(Transform2D::from_translation(-10.0, 0.0));
+        skinner.add_bone(b1);
+
+        // Vertex at (10, 0) split 50/50 between Root and Arm
+        skinner.add_vertex([10.0, 0.0], vec![(0, 0.5), (1, 0.5)]);
+
+        // Bind pose deformation check -> identity
+        let v_rest = skinner.deform();
+        assert!((v_rest[0][0] - 10.0).abs() < 1e-4);
+        assert!((v_rest[0][1] - 0.0).abs() < 1e-4);
+
+        // Pose Arm bone with +10 translation along Y
+        skinner.set_bone_pose(1, Transform2D::from_translation(0.0, 10.0));
+        let v_posed = skinner.deform();
+        // Root holds it at (10, 0) * 0.5, Arm shifts it to (10, 10) * 0.5 => (10, 5)
+        assert!((v_posed[0][0] - 10.0).abs() < 1e-4);
+        assert!((v_posed[0][1] - 5.0).abs() < 1e-4);
     }
 }

@@ -7,6 +7,7 @@ pub mod parser_fuzzers;
 pub mod scene_tree_fuzzer;
 pub mod subsystem_fuzzers;
 pub mod undo_redo_fuzzer;
+pub mod v1_godot_parity_fuzzers;
 pub mod v2_worldclass_fuzzers;
 pub mod wave2b_fuzzers;
 
@@ -14,6 +15,20 @@ pub use adversarial::run_all_adversarial_suites;
 pub use subsystem_fuzzers::{
     verify_animation_state_machine_fuzzer_suite, verify_navigation_and_autotile_fuzzer_suite,
     verify_physics_and_audio_dsp_fuzzer_suite, verify_ui_layout_container_solver_suite,
+};
+pub use v1_godot_parity_fuzzers::{
+    verify_audio_ringbuffer_and_input_deadzone_suite,
+    verify_bbcode_and_terrain_autotiler_suite,
+    verify_classdb_hierarchy_invariants_suite,
+    verify_fpckexec_binary_trailer_adversarial_suite,
+    verify_gdextension_c_abi_boundary_suite,
+    verify_gdextension_manifest_fuzzing_suite,
+    verify_gdscript_coroutine_resumption_suite,
+    verify_gdscript_match_and_typed_collections_suite,
+    verify_gdlsp_analyzer_bounds_suite,
+    verify_hostile_glb_fuzzing_suite,
+    verify_rapier_port_hotswap_and_controller_proptest_suite,
+    verify_tres_manifest_fuzzing_suite,
 };
 pub use v2_worldclass_fuzzers::{
     verify_meshlet_and_pbr_perceptual_suite,

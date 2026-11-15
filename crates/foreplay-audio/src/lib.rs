@@ -1,12 +1,23 @@
+pub mod codecs;
 pub mod effects;
+pub mod hardware_io;
 pub mod procedural_synth;
+pub mod spatial3d;
 pub mod timeline;
 
+pub use codecs::{
+    decode_audio_bytes, decode_raw_pcm_i16, encode_pcm_wav_i16, resample_interleaved_stereo,
+    resample_interleaved_stereo_with_quality, AudioCodecError, DecodedAudioAsset, ResampleQuality,
+};
 pub use effects::{
     AudioEffect, AudioEffectChorus, AudioEffectEq3Band, AudioEffectLimiter, AudioEffectLowPassFilter,
     AudioEffectReverb,
 };
+pub use hardware_io::{AudioOutputBackend, AudioRingBuffer, CpalAudioDriver};
 pub use procedural_synth::{SkateFoleySynth, SpatialPanner3D, SpectrumAnalyzer32};
+pub use spatial3d::{
+    AttenuationModel, AudioListener3D, AudioStreamPlayer3D, SpatialAudioFrame,
+};
 pub use timeline::{AudioClip, AudioTimeline, AudioTimelineTrack, SAMPLE_RATE};
 
 use std::collections::BTreeMap;

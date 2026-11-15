@@ -1,0 +1,34 @@
+[package]
+name = "foreplay-player"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MPL-2.0"
+description = "Standalone native Foreplay Game Engine runtime player (.fpck + embedded FPCKEXEC boot + winit/wgpu/cpal/rapier + Remote PIE IPC debugger)"
+
+[[bin]]
+name = "foreplay-player"
+path = "src/main.rs"
+
+[dependencies]
+foreplay-ir = { path = "../foreplay-ir" }
+foreplay-core = { path = "../foreplay-core" }
+foreplay-platform = { path = "../foreplay-platform" }
+foreplay-render = { path = "../foreplay-render" }
+foreplay-physics = { path = "../foreplay-physics" }
+foreplay-audio = { path = "../foreplay-audio" }
+foreplay-net = { path = "../foreplay-net" }
+foreplay-script = { path = "../foreplay-script" }
+foreplay-gdscript = { path = "../foreplay-gdscript" }
+foreplay-gdext = { path = "../foreplay-gdext" }
+foreplay-polyamour = { path = "../foreplay-polyamour" }
+bevy_math = { workspace = true }
+wgpu = { workspace = true }
+winit = { workspace = true }
+pollster = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

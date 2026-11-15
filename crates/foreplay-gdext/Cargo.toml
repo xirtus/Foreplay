@@ -1,0 +1,18 @@
+[package]
+name = "foreplay-gdext"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MPL-2.0"
+description = "Godot 4.4 GDExtension C ABI compatibility layer, .gdextension manifest parser, and ClassDB/GdVm runtime bridge"
+
+[dependencies]
+foreplay-ir = { path = "../foreplay-ir" }
+foreplay-core = { path = "../foreplay-core" }
+foreplay-gdscript = { path = "../foreplay-gdscript" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

@@ -4,10 +4,11 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "GPL-3.0-only"
-description = "Phase 6 One-Click Game Exporter (.fpck archive + Linux/SteamDeck, Windows, macOS .app, WebGPU URL, and SexOS sexlife package bundlers)"
+description = "One-Click Game Exporter (.fpck archive + self-contained FPCKEXEC native binaries for Linux/SteamDeck, Windows, macOS .app, WebGPU, Three.js Vite, and SexOS .sexpkg)"
 
 [dependencies]
 foreplay-ir = { path = "../foreplay-ir" }
+foreplay-player = { path = "../foreplay-player" }
 foreplay-threejs = { path = "../foreplay-threejs" }
 serde = { workspace = true }
 serde_json = { workspace = true }
