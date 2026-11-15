@@ -8,6 +8,10 @@ description = "Native Rust hot-reload scripting host and rustports-quickjs TypeS
 
 [dependencies]
 foreplay-ir = { path = "../foreplay-ir" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true
+

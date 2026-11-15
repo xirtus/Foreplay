@@ -1,6 +1,10 @@
 //! Foreplay AI Harness (`Observe -> Plan -> Act -> Verify`).
 //! Shared command session backing both the MCP Agent API and Editor Undo/Redo history.
 
+pub mod rpc;
+
+pub use rpc::HarnessRpcServer;
+
 use foreplay_atlas::AtlasTaskContext;
 use foreplay_core::SceneTree;
 use foreplay_ir::{EditorCommand, IrError, IrScene};

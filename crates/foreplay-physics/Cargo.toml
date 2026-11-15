@@ -8,6 +8,7 @@ description = "PhysicsServer2D/3D with live hotswapping between Rapier and faith
 
 [dependencies]
 foreplay-ir = { path = "../foreplay-ir" }
+bevy_math = { workspace = true }
 
 [lints]
 workspace = true

@@ -14,21 +14,34 @@ members = [
     "crates/foreplay-harness",
     "crates/foreplay-porthost",
     "crates/foreplay-editor",
+    "crates/foreplay-verifier",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.95"
 repository = "https://github.com/xirtus/foreplay"
 homepage = "https://sexos.dev"
 
 [workspace.dependencies]
 # Principle #1 (from 3JSE): Bevy is an upgradable modular substrate, NEVER a fork.
-# Core ECS & Reflection support no_std / custom platforms (Linux + SexOS userspace).
 bevy_ecs = { version = "0.20.1", default-features = false, features = ["std", "bevy_reflect"] }
 bevy_reflect = { version = "0.20.1", default-features = false, features = ["std"] }
 bevy_math = { version = "0.20.1", default-features = false, features = ["std", "alloc"] }
+
+# Serialization & Errors
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+
+# Editor UI Foundation (Linux/Wayland/X11/SteamDeck, macOS, Windows, WebGPU & SexOS egui backend)
+egui = "0.36"
+eframe = { version = "0.36", default-features = true }
+egui_dock = "0.21.1"
+
+# Adversarial Verification & Property Testing (Track E Carbon Verifier)
+proptest = "1.12.0"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

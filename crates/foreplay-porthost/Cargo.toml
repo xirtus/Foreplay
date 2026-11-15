@@ -8,6 +8,10 @@ description = "BYO-ROM retail archive mount (port://), RustPorts wave runner, an
 
 [dependencies]
 foreplay-ir = { path = "../foreplay-ir" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true
+

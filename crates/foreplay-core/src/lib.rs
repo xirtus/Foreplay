@@ -9,9 +9,11 @@
 
 use bevy_ecs::hierarchy::ChildOf;
 use bevy_ecs::prelude::*;
+use bevy_math::{Quat, Vec3};
 use bevy_reflect::Reflect;
-use foreplay_ir::{IrScene, NodeId, PortArchiveMount};
+use foreplay_ir::{IrScene, IrValue, NodeId, PortArchiveMount};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 /// Godot-parity deterministic frame lifecycle stages mapped onto Bevy `Schedule` labels.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -30,6 +32,146 @@ pub struct ForeplayNodeMeta {
     pub ir_id: u64,
     pub name: String,
     pub godot_class: String,
+}
+
+/// Godot-style global/world 3D transform component.
+#[derive(Component, Reflect, Clone, Copy, Debug, PartialEq)]
+#[reflect(Component)]
+pub struct ForeplayGlobalTransform3D {
+    pub translation: Vec3,
+    pub rotation_quat: Quat,
+    pub scale: Vec3,
+}
+
+impl Default for ForeplayGlobalTransform3D {
+    fn default() -> Self {
+        Self {
+            translation: Vec3::ZERO,
+            rotation_quat: Quat::IDENTITY,
+            scale: Vec3::ONE,
+        }
+    }
+}
+
+/// Godot-style local 3D transform component.
+#[derive(Component, Reflect, Clone, Copy, Debug, PartialEq)]
+#[reflect(Component)]
+#[require(ForeplayGlobalTransform3D)]
+pub struct ForeplayTransform3D {
+    pub translation: Vec3,
+    pub rotation_quat: Quat,
+    pub scale: Vec3,
+}
+
+impl Default for ForeplayTransform3D {
+    fn default() -> Self {
+        Self {
+            translation: Vec3::ZERO,
+            rotation_quat: Quat::IDENTITY,
+            scale: Vec3::ONE,
+        }
+    }
+}
+
+impl ForeplayTransform3D {
+    pub const fn from_translation(translation: Vec3) -> Self {
+        Self {
+            translation,
+            rotation_quat: Quat::IDENTITY,
+            scale: Vec3::ONE,
+        }
+    }
+
+    pub const fn from_xyz(x: f32, y: f32, z: f32) -> Self {
+        Self {
+            translation: Vec3::new(x, y, z),
+            rotation_quat: Quat::IDENTITY,
+            scale: Vec3::ONE,
+        }
+    }
+}
+
+/// Godot-style visibility component.
+#[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Eq)]
+#[reflect(Component)]
+pub struct ForeplayVisibility {
+    pub visible: bool,
+}
+
+impl Default for ForeplayVisibility {
+    fn default() -> Self {
+        Self { visible: true }
+    }
+}
+
+/// Godot-style 3D Node marker automatically requiring spatial and visibility components.
+#[derive(Component, Reflect, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[reflect(Component)]
+#[require(ForeplayTransform3D, ForeplayVisibility)]
+pub struct ForeplayNode3D;
+
+/// Errors arising from PackedScene registration and instantiation.
+#[derive(Clone, PartialEq, Eq, Debug, thiserror::Error)]
+pub enum PackedSceneError {
+    #[error("scene prefab not found in registry: {0}")]
+    PrefabNotFound(String),
+    #[error("prefab '{0}' has no root node")]
+    PrefabHasNoRoot(String),
+}
+
+/// Registry of named `res://...` `IrScene` prefabs (PackedScenes).
+#[derive(Resource, Clone, Debug, Default, PartialEq)]
+pub struct PackedSceneRegistry {
+    scenes: BTreeMap<String, IrScene>,
+}
+
+impl PackedSceneRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn register(&mut self, path: impl Into<String>, scene: IrScene) {
+        self.scenes.insert(path.into(), scene);
+    }
+
+    pub fn get(&self, path: &str) -> Option<&IrScene> {
+        self.scenes.get(path)
+    }
+
+    pub fn remove(&mut self, path: &str) -> Option<IrScene> {
+        self.scenes.remove(path)
+    }
+
+    pub fn contains(&self, path: &str) -> bool {
+        self.scenes.contains_key(path)
+    }
+
+    pub fn len(&self) -> usize {
+        self.scenes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.scenes.is_empty()
+    }
+}
+
+/// Godot-parity signal event triggered on entities.
+#[derive(EntityEvent, Clone, PartialEq, Debug)]
+pub struct SignalDispatched {
+    pub entity: Entity,
+    pub from_node: NodeId,
+    pub signal_name: String,
+    pub to_node: NodeId,
+    pub method_name: String,
+    pub payload: IrValue,
+}
+
+/// Play-In-Editor snapshot for zero-rebuild Play/Stop restoration.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SceneSnapshot {
+    pub scene: IrScene,
+    pub tick_count: u64,
+    pub registry: PackedSceneRegistry,
 }
 
 /// Capability-clean Virtual File System supporting `res://`, `user://`, and `port://` BYO-ROM mounts.
@@ -52,6 +194,60 @@ impl VirtualFileSystem {
     }
 }
 
+/// Determines whether a class name represents a 3D spatial node.
+fn is_node_3d(class_name: &str) -> bool {
+    class_name == "Node3D" || class_name.ends_with("3D")
+}
+
+/// Applies recognized spatial properties from an `IrNode` property map onto spawned entity components.
+fn apply_spatial_properties(world: &mut World, entity: Entity, props: &BTreeMap<String, IrValue>) {
+    let mut transform = world.get::<ForeplayTransform3D>(entity).copied().unwrap_or_default();
+    let mut vis = world.get::<ForeplayVisibility>(entity).copied().unwrap_or_default();
+    let mut modified_transform = false;
+    let mut modified_vis = false;
+
+    for (k, v) in props {
+        match k.as_str() {
+            "translation" | "position" => {
+                if let IrValue::Vec3([x, y, z]) = v {
+                    transform.translation = Vec3::new(*x, *y, *z);
+                    modified_transform = true;
+                }
+            }
+            "rotation_quat" | "rotation" => {
+                if let IrValue::Quat([x, y, z, w]) = v {
+                    transform.rotation_quat = Quat::from_xyzw(*x, *y, *z, *w);
+                    modified_transform = true;
+                }
+            }
+            "scale" => {
+                if let IrValue::Vec3([x, y, z]) = v {
+                    transform.scale = Vec3::new(*x, *y, *z);
+                    modified_transform = true;
+                }
+            }
+            "visible" => {
+                if let IrValue::Bool(b) = v {
+                    vis.visible = *b;
+                    modified_vis = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if modified_transform
+        && let Some(mut t) = world.get_mut::<ForeplayTransform3D>(entity)
+    {
+        *t = transform;
+    }
+    if modified_vis
+        && let Some(mut v) = world.get_mut::<ForeplayVisibility>(entity)
+    {
+        *v = vis;
+    }
+}
+
 /// Runtime `SceneTree` bridging canonical `IrScene` documents into a live `bevy_ecs::World`.
 pub struct SceneTree {
     pub active_scene: IrScene,
@@ -59,6 +255,9 @@ pub struct SceneTree {
     pub ir_to_entity: BTreeMap<NodeId, Entity>,
     pub root: Option<NodeId>,
     pub tick_count: u64,
+    pub signal_history: Vec<SignalDispatched>,
+    #[allow(clippy::type_complexity)]
+    signal_callbacks: BTreeMap<(NodeId, String), Vec<Arc<dyn Fn(&SignalDispatched) + Send + Sync>>>,
 }
 
 impl std::fmt::Debug for SceneTree {
@@ -68,6 +267,7 @@ impl std::fmt::Debug for SceneTree {
             .field("entity_count", &self.ir_to_entity.len())
             .field("root", &self.root)
             .field("tick_count", &self.tick_count)
+            .field("dispatched_signals_count", &self.signal_history.len())
             .finish()
     }
 }
@@ -81,24 +281,105 @@ impl Default for SceneTree {
 impl SceneTree {
     /// Materializes a canonical `IrScene` into a live `bevy_ecs` 0.20 `World` using native `ChildOf` relations.
     pub fn from_ir(scene: IrScene) -> Self {
+        Self::from_ir_with_registry(scene, &PackedSceneRegistry::default())
+    }
+
+    /// Materializes a canonical `IrScene` with access to a `PackedSceneRegistry` for instancing.
+    pub fn from_ir_with_registry(scene: IrScene, registry: &PackedSceneRegistry) -> Self {
         let mut world = World::new();
+        world.insert_resource(registry.clone());
         let mut ir_to_entity = BTreeMap::new();
         let root = scene.nodes.values().find(|n| n.parent.is_none()).map(|n| n.id);
 
-        // Pass 1: spawn entities with `ForeplayNodeMeta`
+        // Pass 1: spawn entities with `ForeplayNodeMeta` and spatial components
         for (&node_id, ir_node) in &scene.nodes {
             let packed_id = (u64::from(node_id.generation.get()) << 32) | u64::from(node_id.index);
-            let entity = world
-                .spawn(ForeplayNodeMeta {
-                    ir_id: packed_id,
-                    name: ir_node.name.clone(),
-                    godot_class: ir_node.class_name.clone(),
-                })
-                .id();
+
+            if let Some(res_path) = &ir_node.instance_scene
+                && let Some(prefab) = registry.get(res_path)
+            {
+                let prefab_root = prefab.nodes.values().find(|n| n.parent.is_none());
+
+                    // Start with prefab root's properties and layer local overrides
+                    let mut effective_props = prefab_root
+                        .map(|r| r.properties.clone())
+                        .unwrap_or_default();
+                    effective_props.extend(ir_node.properties.clone());
+
+                    let class_name = if ir_node.class_name.is_empty() {
+                        prefab_root
+                            .map(|r| r.class_name.clone())
+                            .unwrap_or_else(|| "Node".to_string())
+                    } else {
+                        ir_node.class_name.clone()
+                    };
+
+                    let mut entity_cmds = world.spawn(ForeplayNodeMeta {
+                        ir_id: packed_id,
+                        name: ir_node.name.clone(),
+                        godot_class: class_name.clone(),
+                    });
+
+                    if is_node_3d(&class_name) {
+                        entity_cmds.insert(ForeplayNode3D);
+                    }
+                    let host_entity = entity_cmds.id();
+                    apply_spatial_properties(&mut world, host_entity, &effective_props);
+                    ir_to_entity.insert(node_id, host_entity);
+
+                    // Instantiate prefab internal descendants
+                    if let Some(root_p) = prefab_root {
+                        let mut prefab_to_entity = BTreeMap::new();
+                        prefab_to_entity.insert(root_p.id, host_entity);
+
+                        for pn in prefab.nodes.values() {
+                            if pn.id != root_p.id {
+                                let p_packed_id =
+                                    (u64::from(pn.id.generation.get()) << 32) | u64::from(pn.id.index);
+                                let mut pe_cmds = world.spawn(ForeplayNodeMeta {
+                                    ir_id: p_packed_id,
+                                    name: pn.name.clone(),
+                                    godot_class: pn.class_name.clone(),
+                                });
+                                if is_node_3d(&pn.class_name) {
+                                    pe_cmds.insert(ForeplayNode3D);
+                                }
+                                let pe_id = pe_cmds.id();
+                                apply_spatial_properties(&mut world, pe_id, &pn.properties);
+                                prefab_to_entity.insert(pn.id, pe_id);
+                            }
+                        }
+
+                        // Wire prefab descendant parent-child relations
+                        for pn in prefab.nodes.values() {
+                            if pn.id != root_p.id
+                                && let Some(parent_pid) = pn.parent
+                                && let (Some(&pchild_ent), Some(&pparent_ent)) =
+                                    (prefab_to_entity.get(&pn.id), prefab_to_entity.get(&parent_pid))
+                            {
+                                world.entity_mut(pchild_ent).insert(ChildOf(pparent_ent));
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+            // Standard (non-instanced) node spawning
+            let mut entity_cmds = world.spawn(ForeplayNodeMeta {
+                ir_id: packed_id,
+                name: ir_node.name.clone(),
+                godot_class: ir_node.class_name.clone(),
+            });
+
+            if is_node_3d(&ir_node.class_name) {
+                entity_cmds.insert(ForeplayNode3D);
+            }
+            let entity = entity_cmds.id();
+            apply_spatial_properties(&mut world, entity, &ir_node.properties);
             ir_to_entity.insert(node_id, entity);
         }
 
-        // Pass 2: wire Bevy 0.20 `ChildOf` hierarchy relations
+        // Pass 2: wire Bevy 0.20 `ChildOf` hierarchy relations for host scene
         for (&node_id, ir_node) in &scene.nodes {
             if let Some(parent_id) = ir_node.parent
                 && let (Some(&child_ent), Some(&parent_ent)) =
@@ -114,20 +395,120 @@ impl SceneTree {
             ir_to_entity,
             root,
             tick_count: 0,
+            signal_history: Vec::new(),
+            signal_callbacks: BTreeMap::new(),
         }
     }
 
-    /// Re-synchronizes the `bevy_ecs::World` from `active_scene` (used for instant Play-In-Editor snapshot restore).
+    /// Re-synchronizes the `bevy_ecs::World` from `active_scene`.
     pub fn rebuild_world_from_ir(&mut self) {
-        let rebuilt = Self::from_ir(self.active_scene.clone());
+        let registry = self
+            .world
+            .get_resource::<PackedSceneRegistry>()
+            .cloned()
+            .unwrap_or_default();
+        let rebuilt = Self::from_ir_with_registry(self.active_scene.clone(), &registry);
         self.world = rebuilt.world;
         self.ir_to_entity = rebuilt.ir_to_entity;
         self.root = rebuilt.root;
+        self.signal_history.clear();
     }
 
+    /// Advances the engine lifecycle by one frame.
     pub fn step_frame(&mut self) {
         self.world.clear_trackers();
         self.tick_count += 1;
+    }
+
+    /// Emits a signal routing along `active_scene.connections` and triggering Bevy observers/callbacks.
+    pub fn emit_signal(&mut self, from: NodeId, signal_name: &str, payload: IrValue) {
+        let matching_connections: Vec<_> = self
+            .active_scene
+            .connections
+            .iter()
+            .filter(|c| c.from_node == from && c.signal_name == signal_name)
+            .cloned()
+            .collect();
+
+        for conn in matching_connections {
+            let target_entity = self
+                .ir_to_entity
+                .get(&conn.to_node)
+                .copied()
+                .unwrap_or(Entity::PLACEHOLDER);
+
+            let event = SignalDispatched {
+                entity: target_entity,
+                from_node: from,
+                signal_name: signal_name.to_string(),
+                to_node: conn.to_node,
+                method_name: conn.method_name.clone(),
+                payload: payload.clone(),
+            };
+
+            self.signal_history.push(event.clone());
+
+            if let Some(callbacks) = self
+                .signal_callbacks
+                .get(&(conn.to_node, conn.method_name.clone()))
+            {
+                for cb in callbacks {
+                    cb(&event);
+                }
+            }
+
+            if target_entity != Entity::PLACEHOLDER {
+                self.world.trigger(event);
+            }
+        }
+    }
+
+    /// Connects a direct Rust observer callback to a node's method invocation.
+    pub fn connect_signal_callback(
+        &mut self,
+        to_node: NodeId,
+        method_name: impl Into<String>,
+        callback: impl Fn(&SignalDispatched) + Send + Sync + 'static,
+    ) {
+        self.signal_callbacks
+            .entry((to_node, method_name.into()))
+            .or_default()
+            .push(Arc::new(callback));
+    }
+
+    /// Returns a slice of all signals dispatched through `emit_signal`.
+    pub fn dispatched_signals(&self) -> &[SignalDispatched] {
+        &self.signal_history
+    }
+
+    /// Clears recorded dispatched signal history.
+    pub fn clear_dispatched_signals(&mut self) {
+        self.signal_history.clear();
+    }
+
+    /// Captures a Play-In-Editor snapshot.
+    pub fn capture_snapshot(&self) -> SceneSnapshot {
+        let registry = self
+            .world
+            .get_resource::<PackedSceneRegistry>()
+            .cloned()
+            .unwrap_or_default();
+        SceneSnapshot {
+            scene: self.active_scene.clone(),
+            tick_count: self.tick_count,
+            registry,
+        }
+    }
+
+    /// Restores a Play-In-Editor snapshot for zero-rebuild Play/Stop restoration.
+    pub fn restore_snapshot(&mut self, snapshot: SceneSnapshot) {
+        self.active_scene = snapshot.scene;
+        self.tick_count = snapshot.tick_count;
+        let rebuilt = Self::from_ir_with_registry(self.active_scene.clone(), &snapshot.registry);
+        self.world = rebuilt.world;
+        self.ir_to_entity = rebuilt.ir_to_entity;
+        self.root = rebuilt.root;
+        self.signal_history.clear();
     }
 }
 
@@ -135,7 +516,9 @@ impl SceneTree {
 mod tests {
     use super::*;
     use bevy_ecs::hierarchy::Children;
-    use foreplay_ir::IrNode;
+    use bevy_ecs::observer::On;
+    use foreplay_ir::{IrNode, SignalConnection};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn materializes_ir_hierarchy_into_bevy_ecs_relations() {
@@ -177,5 +560,217 @@ mod tests {
 
         let children = tree.world.get::<Children>(root_ent).expect("Children relation");
         assert!(children.contains(&child_ent));
+    }
+
+    #[test]
+    fn required_components_auto_inserted_for_node3d() {
+        let mut world = World::new();
+        let ent = world.spawn(ForeplayNode3D).id();
+
+        // Required components must be automatically attached by Bevy 0.20
+        assert!(world.get::<ForeplayTransform3D>(ent).is_some());
+        assert!(world.get::<ForeplayGlobalTransform3D>(ent).is_some());
+        assert!(world.get::<ForeplayVisibility>(ent).is_some());
+        assert!(world.get::<ForeplayVisibility>(ent).unwrap().visible);
+    }
+
+    #[test]
+    fn packed_scene_instantiation_and_property_override_layering() {
+        let mut registry = PackedSceneRegistry::new();
+
+        // Create prefab "res://prefabs/hero.fscn"
+        let mut hero_prefab = IrScene::new("HeroPrefab");
+        let prefab_root_id = NodeId::new(100, 1).unwrap();
+        let prefab_mesh_id = NodeId::new(101, 1).unwrap();
+
+        let mut prefab_props = BTreeMap::new();
+        prefab_props.insert("speed".into(), IrValue::F64(10.0));
+        prefab_props.insert("health".into(), IrValue::F64(100.0));
+        prefab_props.insert("translation".into(), IrValue::Vec3([0.0, 0.0, 0.0]));
+
+        hero_prefab.nodes.insert(
+            prefab_root_id,
+            IrNode {
+                id: prefab_root_id,
+                name: "HeroPrefabRoot".into(),
+                class_name: "CharacterBody3D".into(),
+                parent: None,
+                instance_scene: None,
+                properties: prefab_props,
+                groups: vec!["heroes".into()],
+            },
+        );
+
+        let mut mesh_props = BTreeMap::new();
+        mesh_props.insert("mesh_path".into(), IrValue::String("res://skater.glb".into()));
+        hero_prefab.nodes.insert(
+            prefab_mesh_id,
+            IrNode {
+                id: prefab_mesh_id,
+                name: "HeroMesh".into(),
+                class_name: "MeshInstance3D".into(),
+                parent: Some(prefab_root_id),
+                instance_scene: None,
+                properties: mesh_props,
+                groups: vec![],
+            },
+        );
+
+        registry.register("res://prefabs/hero.fscn", hero_prefab);
+
+        // Host scene instantiates "res://prefabs/hero.fscn" with property override speed=25.0
+        let mut host_scene = IrScene::new("LevelOne");
+        let world_root_id = NodeId::new(1, 1).unwrap();
+        let hero_instance_id = NodeId::new(2, 1).unwrap();
+
+        host_scene.nodes.insert(
+            world_root_id,
+            IrNode {
+                id: world_root_id,
+                name: "WorldRoot".into(),
+                class_name: "Node3D".into(),
+                parent: None,
+                instance_scene: None,
+                properties: BTreeMap::new(),
+                groups: vec![],
+            },
+        );
+
+        let mut override_props = BTreeMap::new();
+        override_props.insert("speed".into(), IrValue::F64(25.0)); // Overridden!
+        override_props.insert("translation".into(), IrValue::Vec3([5.0, 1.0, -3.0]));
+
+        host_scene.nodes.insert(
+            hero_instance_id,
+            IrNode {
+                id: hero_instance_id,
+                name: "PlayerHero".into(),
+                class_name: "CharacterBody3D".into(),
+                parent: Some(world_root_id),
+                instance_scene: Some("res://prefabs/hero.fscn".into()),
+                properties: override_props,
+                groups: vec!["player".into()],
+            },
+        );
+
+        let tree = SceneTree::from_ir_with_registry(host_scene, &registry);
+        let hero_ent = tree.ir_to_entity[&hero_instance_id];
+        let root_ent = tree.ir_to_entity[&world_root_id];
+
+        // Verify hierarchy: hero is child of root
+        let child_of = tree.world.get::<ChildOf>(hero_ent).expect("ChildOf root");
+        assert_eq!(child_of.parent(), root_ent);
+
+        // Verify hero has spatial transform applied from overrides
+        let transform = tree
+            .world
+            .get::<ForeplayTransform3D>(hero_ent)
+            .expect("Transform on hero");
+        assert_eq!(transform.translation, Vec3::new(5.0, 1.0, -3.0));
+
+        // Verify hero has children from prefab (HeroMesh)
+        let children = tree.world.get::<Children>(hero_ent).expect("Hero children");
+        assert_eq!(children.len(), 1);
+        let mesh_ent = children[0];
+        let mesh_meta = tree
+            .world
+            .get::<ForeplayNodeMeta>(mesh_ent)
+            .expect("Mesh meta");
+        assert_eq!(mesh_meta.name, "HeroMesh");
+        assert_eq!(mesh_meta.godot_class, "MeshInstance3D");
+    }
+
+    #[test]
+    fn signal_dispatched_via_connections_and_bevy_observers() {
+        let mut scene = IrScene::new("SignalTestScene");
+        let emitter_id = NodeId::new(1, 1).unwrap();
+        let receiver_id = NodeId::new(2, 1).unwrap();
+
+        scene.nodes.insert(
+            emitter_id,
+            IrNode {
+                id: emitter_id,
+                name: "ButtonEmitter".into(),
+                class_name: "Node".into(),
+                parent: None,
+                instance_scene: None,
+                properties: BTreeMap::new(),
+                groups: vec![],
+            },
+        );
+        scene.nodes.insert(
+            receiver_id,
+            IrNode {
+                id: receiver_id,
+                name: "GateReceiver".into(),
+                class_name: "Node".into(),
+                parent: None,
+                instance_scene: None,
+                properties: BTreeMap::new(),
+                groups: vec![],
+            },
+        );
+        scene.connections.push(SignalConnection {
+            from_node: emitter_id,
+            signal_name: "pressed".into(),
+            to_node: receiver_id,
+            method_name: "_on_button_pressed".into(),
+        });
+
+        let mut tree = SceneTree::from_ir(scene);
+
+        // Track Bevy observer trigger invocation
+        static OBSERVER_CALLED: AtomicUsize = AtomicUsize::new(0);
+        tree.world.add_observer(|_event: On<SignalDispatched>| {
+            OBSERVER_CALLED.fetch_add(1, Ordering::SeqCst);
+        });
+
+        // Track direct callback invocation
+        static CALLBACK_CALLED: AtomicUsize = AtomicUsize::new(0);
+        tree.connect_signal_callback(receiver_id, "_on_button_pressed", |_| {
+            CALLBACK_CALLED.fetch_add(1, Ordering::SeqCst);
+        });
+
+        // Emit signal
+        tree.emit_signal(emitter_id, "pressed", IrValue::I64(42));
+
+        assert_eq!(tree.dispatched_signals().len(), 1);
+        assert_eq!(tree.dispatched_signals()[0].signal_name, "pressed");
+        assert_eq!(tree.dispatched_signals()[0].payload, IrValue::I64(42));
+        assert_eq!(CALLBACK_CALLED.load(Ordering::SeqCst), 1);
+        assert_eq!(OBSERVER_CALLED.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn play_in_editor_scene_snapshot_restore() {
+        let mut scene = IrScene::new("PietSnapshotTest");
+        let node_id = NodeId::new(1, 1).unwrap();
+        scene.nodes.insert(
+            node_id,
+            IrNode {
+                id: node_id,
+                name: "Player".into(),
+                class_name: "CharacterBody3D".into(),
+                parent: None,
+                instance_scene: None,
+                properties: BTreeMap::new(),
+                groups: vec![],
+            },
+        );
+
+        let mut tree = SceneTree::from_ir(scene);
+        let snapshot = tree.capture_snapshot();
+
+        // Simulate play mode: step 60 frames and mutate tree
+        for _ in 0..60 {
+            tree.step_frame();
+        }
+        assert_eq!(tree.tick_count, 60);
+
+        // Restore snapshot (Stop play mode)
+        tree.restore_snapshot(snapshot);
+        assert_eq!(tree.tick_count, 0);
+        assert_eq!(tree.active_scene.name, "PietSnapshotTest");
+        assert!(tree.ir_to_entity.contains_key(&node_id));
     }
 }

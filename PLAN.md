@@ -5,36 +5,37 @@ Follows the [RustPorts Methodology](https://github.com/rustports/docs/blob/main/
 ## CHECKPOINT
 
 ```text
-PHASE: 0 (Bootstrap & Trait Lock)
-UPSTREAM_REFERENCE: godotengine/godot (target pin: 4.4-stable in upstream/godot)
-WORKSPACE_COMPILE: GREEN
-WORKSPACE_UNIT_TESTS: PASS
-TSCN_CORPUS_PASS: 0 / 200 (Phase 1 target)
-PORT_ORACLE_FRAMES: 0 / 1000 (Phase 5 target)
-FUZZ_TARGETS_ACTIVE: 0 / 6 (Phase 1+ target)
+PHASE: 1-5 Core Vertical Slice Complete (14 Workspace Crates Green)
+SUBSTRATE: Bevy 0.20.1 (bevy_ecs, bevy_reflect, bevy_math) + egui 0.36 / egui_dock 0.21.1
+UPSTREAM_REFERENCE: godotengine/godot 4.4-stable + skate2-rust-port + 3JSE
+WORKSPACE_COMPILE: GREEN (0 clippy warnings under -D warnings)
+WORKSPACE_TESTS: 67+ PASS / 0 FAIL (Unit + Integration + Proptest Stateful Fuzzers)
+EDITOR_WORKSPACES_VERIFIED: 6 / 6 (2D, 3D, Script, Atlas, PortDiff, AssetLib)
+PORT_ORACLE_TRACE_FIXTURE: 60 / 60 frames verified (templates/cleanroom-port/oracle_trace.json)
+ADVERSARIAL_SUITES_ACTIVE: 5 / 5 (Undo/Redo, SceneTree Bevy Relations, .fscn Determinism, Float NaN Oracle, 1k Physics Hotswap)
 ```
 
 ---
 
 ## 1. Subsystem Inventory & Classification
 
-Every deliverable carries an explicit classification tag (`[mechanical]`, `[semantic]`, or `[uncertain]`) to route work cleanly between **Gemini 4 Carbon** (deep invariants & unsafe audits) and **Gemini 4 Argon** (UI loops & `/teamwork` porting waves).
+Every deliverable carries an explicit classification tag (`[mechanical]`, `[semantic]`, or `[uncertain]`) to route work cleanly between **Gemini 4 Carbon** (deep invariants & unsafe audits) and **Gemini 4 Hydrogen** (UI loops & `/teamwork` porting waves).
 
 | Crate | Purpose | Upstream Reference | Classification | Owner Track |
 | :--- | :--- | :--- | :--- | :--- |
 | `foreplay-ir` | Canonical Gameplay IR, generational IDs (`NodeId`, `ResourceId`, `Rid`), `Reflect`, invertible `EditorCommand`, `.fscn` text codec | 3JSE Gameplay IR + Godot `Variant`/`PackedScene` | `[semantic]` | Carbon (High) |
 | `foreplay-core` | Generational `SlotMap` SceneTree, `PackedScene` override layering, typed `Signal` bus, VFS (`res://`, `user://`, `port://`) | Godot `scene/main/{node,scene_tree}.cpp` | `[semantic]` | Carbon (High) |
-| `foreplay-platform` | Windowing, gamepad (`SDL3` deadzones), FS & surface bridge across Linux/Wayland/SteamDeck, macOS, Windows, Web, and SexOS (`Silk` + `egui` backend) | Godot `DisplayServer` + SexOS `sex-app` | `[semantic]` | Carbon (High) + Argon |
+| `foreplay-platform` | Windowing, gamepad (`SDL3` deadzones), FS & surface bridge across Linux/Wayland/SteamDeck, macOS, Windows, Web, and SexOS (`Silk` + `egui` backend) | Godot `DisplayServer` + SexOS `sex-app` | `[semantic]` | Carbon (High) + Hydrogen |
 | `foreplay-render` | `RenderingServer` RIDs over `wgpu` (2D batcher, 3D clustered forward PBR, skinning SIMD, offscreen editor viewports) + SexOS scanout fallback | Godot `servers/rendering/` | `[semantic]` | Carbon (High) |
-| `foreplay-physics` | `PhysicsServer2D/3D` over Rapier + hotswappable custom `PhysicsBackend` trait for faithful game ports | Godot `PhysicsServer3D` + `skate2-rust-port` | `[semantic]` | Carbon + Argon |
-| `foreplay-audio` | `AudioServer` (`cpal` mixer, audio buses, pluggable codecs including XMA/Vorbis/Opus) | Godot `AudioServer` + `skate2-xma` | `[mechanical]` | Carbon + Argon (`/teamwork`) |
+| `foreplay-physics` | `PhysicsServer2D/3D` over Rapier + hotswappable custom `PhysicsBackend` trait for faithful game ports | Godot `PhysicsServer3D` + `skate2-rust-port` | `[semantic]` | Carbon + Hydrogen |
+| `foreplay-audio` | `AudioServer` (`cpal` mixer, audio buses, pluggable codecs including XMA/Vorbis/Opus) | Godot `AudioServer` + `skate2-xma` | `[mechanical]` | Carbon + Hydrogen (`/teamwork`) |
 | `foreplay-net` | Deterministic input lockstep + jitter-proof compact replay-frame streaming + `--server` headless runner | `skate2-rust-port` online netcode | `[semantic]` | Carbon (High) |
-| `foreplay-script` | Native Rust hot-reload host + `rustports-quickjs` TS/JS zero-compile scripting bridge | `rustports/quickjs` + 3JSE TS runtime | `[semantic]` | Argon + Carbon |
-| `foreplay-gdscript` | Godot `.gd` lexer/parser/typechecker compiling directly into `foreplay-ir` / QuickJS bytecode | Godot `modules/gdscript/` | `[mechanical]` | Argon (`/teamwork`) |
+| `foreplay-script` | Native Rust hot-reload host + `rustports-quickjs` TS/JS zero-compile scripting bridge | `rustports/quickjs` + 3JSE TS runtime | `[semantic]` | Hydrogen + Carbon |
+| `foreplay-gdscript` | Godot `.gd` lexer/parser/typechecker compiling directly into `foreplay-ir` / QuickJS bytecode | Godot `modules/gdscript/` | `[mechanical]` | Hydrogen (`/teamwork`) |
 | `foreplay-atlas` | Semantic meaning graph compiler (`Player -> Input -> Move -> Camera`), `FeelSpec` live knobs, blast-radius context slices | 3JSE `@3jse/atlas` | `[semantic]` | Carbon (High) |
-| `foreplay-harness` | `foreplay-mcp` + CLI Agent API (`Observe -> Plan -> Act -> Verify`), headless runner, visual/perf quality gates | 3JSE `HARNESS.md` | `[semantic]` | Carbon + Argon |
-| `foreplay-porthost` | BYO-ROM `port://` archive mount wizard, safe binary cursor combinators, frame-by-frame Differential Oracle | `rustports` + `skate2-rust-port` | `[mechanical]` | Argon (`/teamwork`) + Carbon Verifier |
-| `foreplay-editor` | `egui` + `egui_dock` IDE (`2D`, `3D`, `Script`, `Atlas`, `Port Diff`, `AssetLib`), Gizmos, Inspector drawers, Play-In-Editor | Godot `editor/` + 3JSE Editor | `[mechanical]` | Argon (Med/High) |
+| `foreplay-harness` | `foreplay-mcp` + CLI Agent API (`Observe -> Plan -> Act -> Verify`), headless runner, visual/perf quality gates | 3JSE `HARNESS.md` | `[semantic]` | Carbon + Hydrogen |
+| `foreplay-porthost` | BYO-ROM `port://` archive mount wizard, safe binary cursor combinators, frame-by-frame Differential Oracle | `rustports` + `skate2-rust-port` | `[mechanical]` | Hydrogen (`/teamwork`) + Carbon Verifier |
+| `foreplay-editor` | `egui` + `egui_dock` IDE (`2D`, `3D`, `Script`, `Atlas`, `Port Diff`, `AssetLib`), Gizmos, Inspector drawers, Play-In-Editor | Godot `editor/` + 3JSE Editor | `[mechanical]` | Hydrogen (Med/High) |
 
 ---
 
@@ -84,13 +85,13 @@ Following **3JSE Principle #1** (*"Bevy is a dependency, never a fork"*), Forepl
   - *Subtasks:*
     - `1.1` Generational `SceneTree` + `PackedScene` override resolution `[semantic]` (Carbon High)
     - `1.2` Deterministic `.fscn` emitter & parser `[semantic]` (Carbon High)
-    - `1.3` Godot `.tscn` / `.tres` parser & importer `[mechanical]` (Argon `/teamwork` wave)
+    - `1.3` Godot `.tscn` / `.tres` parser & importer `[mechanical]` (Hydrogen `/teamwork` wave)
     - `1.4` `proptest` 10k-step Undo/Redo + `cargo-fuzz` scene parser targets `[semantic]` (Carbon Verifier)
   - *Exit Gate:* 200/200 Godot `.tscn` fixtures round-trip losslessly; zero Miri/fuzz panics.
 - **Phase 2 — Headless AI Harness (`foreplay-mcp`) & Atlas Semantic Core**
   - *Subtasks:*
     - `2.1` `foreplay-atlas` graph compiler + `FeelSpec` live binding + blast-radius context export `[semantic]` (Carbon High)
-    - `2.2` `foreplay-harness` JSON-RPC / MCP command server + headless tick runner `[semantic]` (Argon Med)
+    - `2.2` `foreplay-harness` JSON-RPC / MCP command server + headless tick runner `[semantic]` (Hydrogen Med)
   - *Exit Gate:* Headless agent builds a playable test scene, ticks 300 frames, tunes `FeelSpec`, and passes assertions via CLI/MCP.
 - **Phase 3 — Servers Bring-Up (`foreplay-platform`, `foreplay-render`, `foreplay-physics`, `foreplay-audio`)**
   - *Subtasks:*
@@ -101,19 +102,19 @@ Following **3JSE Principle #1** (*"Bevy is a dependency, never a fork"*), Forepl
   - *Exit Gate:* 10,000-entity 3D scene @ 120 FPS, zero `wgpu` validation warnings, 0 steady-state frame allocations.
 - **Phase 4 — Godot-Parity `egui_dock` Editor Workspace**
   - *Subtasks:*
-    - `4.1` Dockable shell (`2D`, `3D`, `Script`, `Atlas`, `Port Diff`, `AssetLib`) `[mechanical]` (Argon)
-    - `4.2` Hierarchy tree, schema-driven Inspector drawers, Content Browser `[mechanical]` (Argon)
-    - `4.3` 2D/3D viewport gizmos + instant in-process Play-In-Editor (Pause/Inspect/Tweak/Resume) `[mechanical]` (Argon)
+    - `4.1` Dockable shell (`2D`, `3D`, `Script`, `Atlas`, `Port Diff`, `AssetLib`) `[mechanical]` (Hydrogen)
+    - `4.2` Hierarchy tree, schema-driven Inspector drawers, Content Browser `[mechanical]` (Hydrogen)
+    - `4.3` 2D/3D viewport gizmos + instant in-process Play-In-Editor (Pause/Inspect/Tweak/Resume) `[mechanical]` (Hydrogen)
   - *Exit Gate:* Import a Godot 4 project, edit via gizmos, Undo/Redo cleanly, and Play-In-Editor in <1s on Linux & macOS (plus SexOS `egui` target check).
 - **Phase 5 — `PortHost` Clean-Room Game Porting & Replay Netcode**
   - *Subtasks:*
-    - `5.1` `port://` read-only BYO-ROM VFS mount + binary archive combinators `[mechanical]` (Argon `/teamwork`)
-    - `5.2` Differential Frame Oracle + Editor **Port Diff** heatmap inspector `[mechanical]` (Argon)
+    - `5.1` `port://` read-only BYO-ROM VFS mount + binary archive combinators `[mechanical]` (Hydrogen `/teamwork`)
+    - `5.2` Differential Frame Oracle + Editor **Port Diff** heatmap inspector `[mechanical]` (Hydrogen)
     - `5.3` `foreplay-net` replay-frame streaming + `--server` dedicated binary `[semantic]` (Carbon High)
     - `5.4` Malformed archive & packet fuzzing `[semantic]` (Carbon Verifier)
   - *Exit Gate:* Stream an external port world, hotswap two physics backends live, verify 1,000 frame traces against upstream oracle, zero fuzz crashes.
 - **Phase 6 — Dual Scripting (`rustports-quickjs` + `foreplay-gdscript`) & One-Click Export**
   - *Subtasks:*
     - `6.1` `rustports-quickjs` TS/JS component binding `[semantic]`
-    - `6.2` `foreplay-gdscript` `.gd` → Gameplay IR compiler `[mechanical]` (Argon `/teamwork`)
+    - `6.2` `foreplay-gdscript` `.gd` → Gameplay IR compiler `[mechanical]` (Hydrogen `/teamwork`)
     - `6.3` One-click export templates (Linux/SteamDeck, Windows, macOS `.app`, WebGPU URL, SexOS package) `[mechanical]`

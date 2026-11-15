@@ -10,6 +10,12 @@ description = "3JSE-style AI Agent API / MCP server, Undo/Redo journal, and head
 foreplay-ir = { path = "../foreplay-ir" }
 foreplay-core = { path = "../foreplay-core" }
 foreplay-atlas = { path = "../foreplay-atlas" }
+foreplay-porthost = { path = "../foreplay-porthost" }
+foreplay-gdscript = { path = "../foreplay-gdscript" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true
+

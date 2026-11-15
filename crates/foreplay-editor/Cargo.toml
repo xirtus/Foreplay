@@ -19,6 +19,10 @@ foreplay-gdscript = { path = "../foreplay-gdscript" }
 foreplay-atlas = { path = "../foreplay-atlas" }
 foreplay-harness = { path = "../foreplay-harness" }
 foreplay-porthost = { path = "../foreplay-porthost" }
+egui = { workspace = true }
+eframe = { workspace = true }
+egui_dock = { workspace = true }
+bevy_math = { workspace = true }
 
 [lints]
 workspace = true

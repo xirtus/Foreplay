@@ -1,0 +1,23 @@
+[package]
+name = "foreplay-verifier"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-3.0-only"
+description = "Independent Carbon Adversarial Verifier: proptest state machines, parser fuzzing & differential invariant gates"
+
+[dependencies]
+foreplay-ir = { path = "../foreplay-ir" }
+foreplay-core = { path = "../foreplay-core" }
+foreplay-atlas = { path = "../foreplay-atlas" }
+foreplay-physics = { path = "../foreplay-physics" }
+foreplay-net = { path = "../foreplay-net" }
+foreplay-gdscript = { path = "../foreplay-gdscript" }
+foreplay-harness = { path = "../foreplay-harness" }
+foreplay-porthost = { path = "../foreplay-porthost" }
+bevy_ecs = { workspace = true }
+proptest = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

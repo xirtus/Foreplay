@@ -8,6 +8,10 @@ description = "Godot 4 GDScript (.gd) compatibility front-end compiling into For
 
 [dependencies]
 foreplay-ir = { path = "../foreplay-ir" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true
+

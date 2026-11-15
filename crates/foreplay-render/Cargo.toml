@@ -9,6 +9,7 @@ description = "Godot-style RenderingServer RIDs over wgpu + SexOS scanout fallba
 [dependencies]
 foreplay-ir = { path = "../foreplay-ir" }
 foreplay-platform = { path = "../foreplay-platform" }
+bevy_math = { workspace = true }
 
 [lints]
 workspace = true

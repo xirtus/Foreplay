@@ -4,14 +4,19 @@
 //! Visual Graph, and the AI Harness) around one deterministic, git-diffable,
 //! borrow-safe data model.
 
+pub mod fscn;
+
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
 
+pub use fscn::FscnParseError;
+
 /// Generational handle identifying a `Node` in a `SceneTree` or `IrScene`.
 /// Mirrors Godot's `ObjectID` without raw pointer aliasing or `RefCell` cycles.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 pub struct NodeId {
     pub index: u32,
     pub generation: NonZeroU32,
@@ -30,7 +35,7 @@ impl NodeId {
 }
 
 /// Generational handle identifying an immutable or COW `Resource`.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 pub struct ResourceId {
     pub index: u32,
     pub generation: NonZeroU32,
@@ -70,7 +75,7 @@ impl<Tag> Rid<Tag> {
 /// Canonical dynamically-typed value for Inspector drawers, `.fscn`/`.tscn` serialization,
 /// `FeelSpec` live tuning, and AI Agent JSON-RPC inspection.
 /// Mirrors Godot's `Variant`.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub enum IrValue {
     Nil,
     Bool(bool),
@@ -88,7 +93,7 @@ pub enum IrValue {
 }
 
 /// 3JSE-inspired `FeelSpec` tuning knob bound directly to a component/node property.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct FeelSpecKnob {
     pub key: String,
     pub intent: String,
@@ -109,7 +114,7 @@ pub trait ReflectNode {
 }
 
 /// A single node inside an `IrScene` (`BTreeMap` guarantees deterministic `.fscn` git diffs).
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct IrNode {
     pub id: NodeId,
     pub name: String,
@@ -122,7 +127,7 @@ pub struct IrNode {
 }
 
 /// Typed signal wire (`Mirrors SceneState::ConnectionData` in Godot).
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct SignalConnection {
     pub from_node: NodeId,
     pub signal_name: String,
@@ -131,7 +136,7 @@ pub struct SignalConnection {
 }
 
 /// Canonical serializable scene representation shared by Editor, Code, Graph, and AI Harness.
-#[derive(Clone, PartialEq, Debug, Default)]
+#[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
 pub struct IrScene {
     pub name: String,
     pub nodes: BTreeMap<NodeId, IrNode>,
@@ -149,38 +154,85 @@ impl IrScene {
 
     /// Deterministic `.fscn` text emission (sorted keys guarantee clean git merges).
     pub fn to_fscn_string(&self) -> String {
-        let mut out = format!("[foreplay_scene name=\"{}\" format=1]\n", self.name);
+        let mut out = format!("[foreplay_scene name=\"{}\" format=1]\n", fscn::escape_str(&self.name));
         for (key, val) in &self.feel_overrides {
-            out.push_str(&format!("[feel_spec key=\"{key}\" value={val:.6}]\n"));
+            out.push_str(&format!("[feel_spec key=\"{}\" value={}]\n", fscn::escape_str(key), fscn::format_f64(*val)));
         }
         for node in self.nodes.values() {
             out.push_str(&format!(
                 "\n[node id=\"{}:{}\" name=\"{}\" type=\"{}\"",
-                node.id.index, node.id.generation, node.name, node.class_name
+                node.id.index, node.id.generation, fscn::escape_str(&node.name), fscn::escape_str(&node.class_name)
             ));
             if let Some(parent) = node.parent {
                 out.push_str(&format!(" parent=\"{}:{}\"", parent.index, parent.generation));
             }
             if let Some(inst) = &node.instance_scene {
-                out.push_str(&format!(" instance=\"{inst}\""));
+                out.push_str(&format!(" instance=\"{}\"", fscn::escape_str(inst)));
+            }
+            if !node.groups.is_empty() {
+                out.push_str(" groups=[");
+                for (i, g) in node.groups.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push_str(&format!("\"{}\"", fscn::escape_str(g)));
+                }
+                out.push(']');
             }
             out.push_str("]\n");
             for (k, v) in &node.properties {
-                out.push_str(&format!("{k} = {v:?}\n"));
+                out.push_str(&format!("{k} = {}\n", fscn::serialize_ir_value(v)));
             }
         }
         for conn in &self.connections {
             out.push_str(&format!(
                 "\n[connection signal=\"{}\" from=\"{}:{}\" to=\"{}:{}\" method=\"{}\"]\n",
-                conn.signal_name,
+                fscn::escape_str(&conn.signal_name),
                 conn.from_node.index,
                 conn.from_node.generation,
                 conn.to_node.index,
                 conn.to_node.generation,
-                conn.method_name
+                fscn::escape_str(&conn.method_name)
             ));
         }
         out
+    }
+
+    /// Lossless, zero-panic parser converting `.fscn` document text into `IrScene`.
+    pub fn from_fscn_str(input: &str) -> Result<Self, FscnParseError> {
+        fscn::parse_fscn(input)
+    }
+
+    /// Checks if setting `child`'s parent to `candidate_parent` would produce a cycle in the hierarchy.
+    pub fn would_create_cycle(&self, child: NodeId, candidate_parent: Option<NodeId>) -> bool {
+        let Some(parent) = candidate_parent else {
+            return false;
+        };
+        if child == parent {
+            return true;
+        }
+        let ancestors = self.ancestors_of(parent);
+        ancestors.contains(&child)
+    }
+
+    /// Returns the sequence of ancestors from the node's immediate parent up to the root.
+    pub fn ancestors_of(&self, node: NodeId) -> Vec<NodeId> {
+        let mut ancestors = Vec::new();
+        let mut current = node;
+        let mut visited = std::collections::BTreeSet::new();
+        visited.insert(current);
+        while let Some(n) = self.nodes.get(&current) {
+            if let Some(parent) = n.parent {
+                if !visited.insert(parent) {
+                    break;
+                }
+                ancestors.push(parent);
+                current = parent;
+            } else {
+                break;
+            }
+        }
+        ancestors
     }
 }
 
@@ -207,7 +259,7 @@ impl fmt::Display for IrError {
 impl std::error::Error for IrError {}
 
 /// Invertible command bus shared by `foreplay-editor` (Undo/Redo) and `foreplay-harness` (MCP Agent API).
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub enum EditorCommand {
     InsertNode {
         node: IrNode,
@@ -369,5 +421,158 @@ mod tests {
         insert_cmd.inverse().apply(&mut scene).unwrap();
 
         assert_eq!(scene, initial);
+    }
+
+    #[test]
+    fn fscn_lossless_roundtrip_all_ir_value_types() {
+        let mut scene = IrScene::new("ComprehensiveRoundTripTest");
+        scene.feel_overrides.insert("gravity".into(), 9.81);
+        scene.feel_overrides.insert("air_resistance".into(), 0.05);
+
+        let root_id = NodeId::new(1, 1).unwrap();
+        let child_id = NodeId::new(2, 1).unwrap();
+
+        let mut root_props = BTreeMap::new();
+        root_props.insert("nil_prop".into(), IrValue::Nil);
+        root_props.insert("bool_true".into(), IrValue::Bool(true));
+        root_props.insert("bool_false".into(), IrValue::Bool(false));
+        root_props.insert("int_pos".into(), IrValue::I64(42));
+        root_props.insert("int_neg".into(), IrValue::I64(-1337));
+        root_props.insert("float_val".into(), IrValue::F64(123.456));
+        root_props.insert("escaped_str".into(), IrValue::String("hello \"world\"\nline2\ttab".into()));
+        root_props.insert("vec2_val".into(), IrValue::Vec2([1.5, -2.5]));
+        root_props.insert("vec3_val".into(), IrValue::Vec3([0.0, 10.0, -5.25]));
+        root_props.insert("quat_val".into(), IrValue::Quat([0.0, 0.7, 0.0, 0.7]));
+        root_props.insert("color_val".into(), IrValue::Color([1.0, 0.5, 0.25, 0.8]));
+        root_props.insert("nodepath_val".into(), IrValue::NodePath("SkaterRoot/Camera3D".into()));
+        root_props.insert("resourcepath_val".into(), IrValue::ResourcePath("res://models/skater.glb".into()));
+
+        let mut nested_map = BTreeMap::new();
+        nested_map.insert("sub_bool".into(), IrValue::Bool(true));
+        nested_map.insert("sub_vec3".into(), IrValue::Vec3([1.0, 2.0, 3.0]));
+        nested_map.insert("sub_arr".into(), IrValue::Array(vec![IrValue::I64(10), IrValue::Nil]));
+
+        root_props.insert(
+            "array_val".into(),
+            IrValue::Array(vec![
+                IrValue::I64(1),
+                IrValue::F64(2.5),
+                IrValue::String("element".into()),
+                IrValue::Map(nested_map.clone()),
+            ]),
+        );
+        root_props.insert("map_val".into(), IrValue::Map(nested_map));
+
+        let root_node = IrNode {
+            id: root_id,
+            name: "WorldRoot".into(),
+            class_name: "Node3D".into(),
+            parent: None,
+            instance_scene: None,
+            properties: root_props,
+            groups: vec!["root_group".into(), "visible".into()],
+        };
+
+        let mut child_props = BTreeMap::new();
+        child_props.insert("speed".into(), IrValue::F64(24.0));
+        let child_node = IrNode {
+            id: child_id,
+            name: "InstancedHero".into(),
+            class_name: "CharacterBody3D".into(),
+            parent: Some(root_id),
+            instance_scene: Some("res://prefabs/hero.fscn".into()),
+            properties: child_props,
+            groups: vec![],
+        };
+
+        scene.nodes.insert(root_id, root_node);
+        scene.nodes.insert(child_id, child_node);
+
+        scene.connections.push(SignalConnection {
+            from_node: child_id,
+            signal_name: "jumped".into(),
+            to_node: root_id,
+            method_name: "_on_hero_jumped".into(),
+        });
+
+        let serialized = scene.to_fscn_string();
+        let parsed = IrScene::from_fscn_str(&serialized).expect("parse must succeed");
+
+        assert_eq!(parsed, scene, "roundtrip scene must be identical");
+    }
+
+    #[test]
+    fn hierarchy_cycle_detection() {
+        let mut scene = IrScene::new("CycleTest");
+        let n1 = NodeId::new(1, 1).unwrap();
+        let n2 = NodeId::new(2, 1).unwrap();
+        let n3 = NodeId::new(3, 1).unwrap();
+
+        // Tree: n1 -> n2 -> n3
+        scene.nodes.insert(
+            n1,
+            IrNode {
+                id: n1,
+                name: "Node1".into(),
+                class_name: "Node".into(),
+                parent: None,
+                instance_scene: None,
+                properties: BTreeMap::new(),
+                groups: vec![],
+            },
+        );
+        scene.nodes.insert(
+            n2,
+            IrNode {
+                id: n2,
+                name: "Node2".into(),
+                class_name: "Node".into(),
+                parent: Some(n1),
+                instance_scene: None,
+                properties: BTreeMap::new(),
+                groups: vec![],
+            },
+        );
+        scene.nodes.insert(
+            n3,
+            IrNode {
+                id: n3,
+                name: "Node3".into(),
+                class_name: "Node".into(),
+                parent: Some(n2),
+                instance_scene: None,
+                properties: BTreeMap::new(),
+                groups: vec![],
+            },
+        );
+
+        assert_eq!(scene.ancestors_of(n3), vec![n2, n1]);
+        assert_eq!(scene.ancestors_of(n2), vec![n1]);
+        assert_eq!(scene.ancestors_of(n1), Vec::<NodeId>::new());
+
+        // Self parent is cycle
+        assert!(scene.would_create_cycle(n1, Some(n1)));
+        // Making n1 child of n3 creates a cycle (n1 -> n2 -> n3 -> n1)
+        assert!(scene.would_create_cycle(n1, Some(n3)));
+        // Making n1 child of n2 creates a cycle (n1 -> n2 -> n1)
+        assert!(scene.would_create_cycle(n1, Some(n2)));
+        // Making n3 child of n1 is safe
+        assert!(!scene.would_create_cycle(n3, Some(n1)));
+        // Making root has no cycle
+        assert!(!scene.would_create_cycle(n3, None));
+    }
+
+    #[test]
+    fn serde_json_derives_work() {
+        let node_id = NodeId::new(42, 7).unwrap();
+        let json = serde_json::to_string(&node_id).unwrap();
+        let deserialized: NodeId = serde_json::from_str(&json).unwrap();
+        assert_eq!(node_id, deserialized);
+
+        let mut scene = IrScene::new("SerdeJsonScene");
+        scene.feel_overrides.insert("tuning".into(), 1.0);
+        let scene_json = serde_json::to_string(&scene).unwrap();
+        let scene_deser: IrScene = serde_json::from_str(&scene_json).unwrap();
+        assert_eq!(scene, scene_deser);
     }
 }

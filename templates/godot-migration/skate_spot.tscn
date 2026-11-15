@@ -1,0 +1,28 @@
+[gd_scene load_steps=3 format=3 uid="uid://b7vskatespot01"]
+
+[ext_resource type="PackedScene" uid="uid://obs01" path="res://skate_obstacle.tscn" id="1_obs"]
+
+[node name="SkateSpot" type="Node3D"]
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 15, 0)
+light_energy = 1.5
+
+[node name="Skater" type="CharacterBody3D" parent="." groups=["players", "skaters"]]
+position = Vector3(0, 1.2, 0)
+rotation = Quaternion(0, 0, 0, 1)
+max_speed = 14.5
+ollie_impulse = 6.8
+is_grounded = true
+skater_name = "SanVanSkater"
+
+[node name="CameraRig" type="Node3D" parent="."]
+position = Vector3(0, 3, 5)
+
+[node name="Camera3D" type="Camera3D" parent="CameraRig"]
+fov = 75.0
+
+[node name="ObstacleRail" parent="." instance=ExtResource("1_obs")]
+position = Vector3(5, 0, 0)
+
+[connection signal="trick_landed" from="Skater" to="CameraRig" method="_on_trick_landed"]
