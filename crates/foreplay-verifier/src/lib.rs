@@ -5,10 +5,24 @@
 pub mod adversarial;
 pub mod parser_fuzzers;
 pub mod scene_tree_fuzzer;
+pub mod subsystem_fuzzers;
 pub mod undo_redo_fuzzer;
+pub mod v2_worldclass_fuzzers;
 pub mod wave2b_fuzzers;
 
 pub use adversarial::run_all_adversarial_suites;
+pub use subsystem_fuzzers::{
+    verify_animation_state_machine_fuzzer_suite, verify_navigation_and_autotile_fuzzer_suite,
+    verify_physics_and_audio_dsp_fuzzer_suite, verify_ui_layout_container_solver_suite,
+};
+pub use v2_worldclass_fuzzers::{
+    verify_meshlet_and_pbr_perceptual_suite,
+    verify_polyamour_blend_io_and_polyops_hostile_suite,
+    verify_polyamour_topology_and_modifiers_suite,
+    verify_threejs_compiler_and_bidirectional_roundtrip_suite,
+    verify_trimesh_gjk_ragdoll_and_moan_timeline_suite,
+    verify_ue6_speculative_rollback_determinism_suite,
+};
 pub use wave2b_fuzzers::{
     verify_1000_frame_physics_differential_gate, verify_fpck_archive_adversarial_suite,
     verify_gdshader_compiler_adversarial_suite, verify_godot4_200_scene_conformance_gate,

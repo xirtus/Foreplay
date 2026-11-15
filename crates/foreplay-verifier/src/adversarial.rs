@@ -10,6 +10,18 @@ use crate::parser_fuzzers::{
     verify_replay_frame_codec_suite, verify_stick_calibration_suite, verify_tscn_hostile_suite,
     verify_wav_codec_hostile_suite,
 };
+use crate::subsystem_fuzzers::{
+    verify_animation_state_machine_fuzzer_suite, verify_navigation_and_autotile_fuzzer_suite,
+    verify_physics_and_audio_dsp_fuzzer_suite, verify_ui_layout_container_solver_suite,
+};
+use crate::v2_worldclass_fuzzers::{
+    verify_meshlet_and_pbr_perceptual_suite,
+    verify_polyamour_blend_io_and_polyops_hostile_suite,
+    verify_polyamour_topology_and_modifiers_suite,
+    verify_threejs_compiler_and_bidirectional_roundtrip_suite,
+    verify_trimesh_gjk_ragdoll_and_moan_timeline_suite,
+    verify_ue6_speculative_rollback_determinism_suite,
+};
 use crate::wave2b_fuzzers::{
     verify_1000_frame_physics_differential_gate, verify_fpck_archive_adversarial_suite,
     verify_gdshader_compiler_adversarial_suite, verify_godot4_200_scene_conformance_gate,
@@ -505,5 +517,17 @@ pub fn run_all_adversarial_suites() -> Vec<VerificationReceipt> {
         verify_godot4_200_scene_conformance_gate(),
         verify_1000_frame_physics_differential_gate(),
         verify_project_exporter_bundle_invariants_suite(),
+        // Wave 3A Subsystem Fuzzers
+        verify_ui_layout_container_solver_suite(),
+        verify_animation_state_machine_fuzzer_suite(),
+        verify_navigation_and_autotile_fuzzer_suite(),
+        verify_physics_and_audio_dsp_fuzzer_suite(),
+        // Wave 3B World-Class Verification Suites
+        verify_polyamour_topology_and_modifiers_suite(),
+        verify_polyamour_blend_io_and_polyops_hostile_suite(),
+        verify_threejs_compiler_and_bidirectional_roundtrip_suite(),
+        verify_ue6_speculative_rollback_determinism_suite(),
+        verify_meshlet_and_pbr_perceptual_suite(),
+        verify_trimesh_gjk_ragdoll_and_moan_timeline_suite(),
     ]
 }

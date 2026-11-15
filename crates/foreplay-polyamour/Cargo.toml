@@ -1,0 +1,17 @@
+[package]
+name = "foreplay-polyamour"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MPL-2.0"
+description = "Built-in Blender/Polyamour-class 3D modeling, HalfEdgeMesh, modifier stack, .blend/glTF/OBJ I/O, polyops scripting, and SAH BVH AgX path tracer"
+
+[dependencies]
+foreplay-ir = { path = "../foreplay-ir" }
+bevy_math = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

@@ -78,16 +78,32 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
 
     painter.rect_filled(rect, 0.0, COLOR_BG_DARK);
 
-    // Pan & Zoom controls
+    // Pan & Zoom controls (macOS 120Hz Trackpad & Mouse Ergonomics)
     if response.dragged_by(PointerButton::Secondary) || response.dragged_by(PointerButton::Middle) {
         let delta = response.drag_delta();
         app.camera_2d.pan += Vec2::new(delta.x / app.camera_2d.zoom, delta.y / app.camera_2d.zoom);
     }
 
     let input = ui.input(|i| i.clone());
-    if response.hovered() && input.smooth_scroll_delta.y != 0.0 {
-        let zoom_delta = input.smooth_scroll_delta.y * 0.002;
-        app.camera_2d.zoom = (app.camera_2d.zoom * (1.0 + zoom_delta)).clamp(0.1, 10.0);
+    if response.hovered() {
+        // Trackpad pinch-to-zoom gesture
+        let pinch = input.zoom_delta();
+        if (pinch - 1.0).abs() > 0.001 {
+            app.camera_2d.zoom = (app.camera_2d.zoom * pinch).clamp(0.1, 10.0);
+        }
+
+        // Smooth two-finger scroll-pan & wheel zoom
+        if input.smooth_scroll_delta != Vec2::ZERO && !response.dragged() {
+            if input.modifiers.command || input.modifiers.ctrl {
+                let zoom_delta = input.smooth_scroll_delta.y * 0.002;
+                app.camera_2d.zoom = (app.camera_2d.zoom * (1.0 + zoom_delta)).clamp(0.1, 10.0);
+            } else {
+                app.camera_2d.pan += Vec2::new(
+                    input.smooth_scroll_delta.x / app.camera_2d.zoom,
+                    input.smooth_scroll_delta.y / app.camera_2d.zoom,
+                );
+            }
+        }
     }
 
     // 1. Draw 2D Grid

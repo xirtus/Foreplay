@@ -25,6 +25,28 @@ use foreplay_verifier::parser_fuzzers::{
     verify_wav_codec_hostile_suite,
 };
 use foreplay_export::{FpckArchive, FpckError};
+use foreplay_core::ui_layout::{
+    AnchorPreset, ContainerKind, ControlLayoutNode, ControlRect, solve_control_hierarchy,
+};
+use foreplay_core::animation::{
+    AnimationClip, AnimationNodeStateMachine, AnimationPlayer, AnimationTrack, InterpolationMode,
+    Keyframe, StateTransition,
+};
+use foreplay_core::navigation::AStarGrid2D;
+use foreplay_physics::{CharacterBody3D, Collider3D, PhysicsWorldState};
+use foreplay_audio::{AudioEffect, AudioEffectLimiter};
+use foreplay_verifier::subsystem_fuzzers::{
+    verify_animation_state_machine_fuzzer_suite, verify_navigation_and_autotile_fuzzer_suite,
+    verify_physics_and_audio_dsp_fuzzer_suite, verify_ui_layout_container_solver_suite,
+};
+use foreplay_verifier::v2_worldclass_fuzzers::{
+    verify_meshlet_and_pbr_perceptual_suite,
+    verify_polyamour_blend_io_and_polyops_hostile_suite,
+    verify_polyamour_topology_and_modifiers_suite,
+    verify_threejs_compiler_and_bidirectional_roundtrip_suite,
+    verify_trimesh_gjk_ragdoll_and_moan_timeline_suite,
+    verify_ue6_speculative_rollback_determinism_suite,
+};
 use foreplay_verifier::wave2b_fuzzers::{
     verify_1000_frame_physics_differential_gate, verify_fpck_archive_adversarial_suite,
     verify_gdshader_compiler_adversarial_suite, verify_godot4_200_scene_conformance_gate,
@@ -229,6 +251,170 @@ proptest! {
     fn test_gdshader_compiler_fuzz_proptest(ref raw_source in "\\PC{0,256}") {
         let _ = foreplay_render::compile_gdshader_to_wgsl(raw_source);
     }
+
+    /// Wave 3A Deliverable 1: UI Layout Solver proptest
+    #[test]
+    fn test_ui_layout_control_rects_finite_proptest(
+        preset_idx in 0usize..16,
+        vp_w in 0.0f32..7680.0,
+        vp_h in 0.0f32..4320.0,
+        child_w in 0.0f32..500.0,
+        child_h in 0.0f32..500.0,
+    ) {
+        let presets = [
+            AnchorPreset::TopLeft, AnchorPreset::TopRight, AnchorPreset::BottomLeft, AnchorPreset::BottomRight,
+            AnchorPreset::CenterLeft, AnchorPreset::CenterTop, AnchorPreset::CenterRight, AnchorPreset::CenterBottom,
+            AnchorPreset::Center, AnchorPreset::LeftWide, AnchorPreset::TopWide, AnchorPreset::RightWide,
+            AnchorPreset::BottomWide, AnchorPreset::VCenterWide, AnchorPreset::HCenterWide, AnchorPreset::FullRect,
+        ];
+        let preset = presets[preset_idx % 16];
+        let root_id = NodeId::new(1, 1).unwrap();
+        let child_id = NodeId::new(2, 1).unwrap();
+
+        let mut root = ControlLayoutNode::new(root_id, ContainerKind::MarginContainer { margins: [5.0, 5.0, 5.0, 5.0] })
+            .with_preset(preset);
+        let child = ControlLayoutNode::new(child_id, ContainerKind::Control)
+            .with_min_size(child_w, child_h);
+        root.add_child(child);
+
+        let vp = ControlRect::new(0.0, 0.0, vp_w, vp_h);
+        let solved = solve_control_hierarchy(vp, &root);
+
+        for (_, r) in solved {
+            prop_assert!(r.x.is_finite(), "x not finite: {r:?}");
+            prop_assert!(r.y.is_finite(), "y not finite: {r:?}");
+            prop_assert!(r.width.is_finite(), "width not finite: {r:?}");
+            prop_assert!(r.height.is_finite(), "height not finite: {r:?}");
+            prop_assert!(r.width >= 0.0, "width negative: {r:?}");
+            prop_assert!(r.height >= 0.0, "height negative: {r:?}");
+        }
+    }
+
+    /// Wave 3A Deliverable 2: Animation interpolation and State machine travel proptest
+    #[test]
+    fn test_animation_interpolation_and_bfs_proptest(
+        dt in -1000.0f32..1000.0,
+        t in 0.0f32..10.0,
+        mode_idx in 0usize..3,
+    ) {
+        let modes = [InterpolationMode::Nearest, InterpolationMode::Linear, InterpolationMode::Cubic];
+        let mode = modes[mode_idx % 3];
+
+        let mut clip = AnimationClip::new("prop_clip", 5.0);
+        clip.add_track(AnimationTrack::Position3DTrack {
+            node_path: "Target".into(),
+            keyframes: vec![
+                Keyframe::new(0.0, [0.0, 0.0, 0.0]),
+                Keyframe::new(2.5, [10.0, 5.0, 2.0]),
+                Keyframe::new(5.0, [0.0, 10.0, 0.0]),
+            ],
+            interpolation: mode,
+        });
+
+        let mut player = AnimationPlayer::new();
+        player.add_clip(clip);
+        player.play("prop_clip");
+        player.playback_position = t;
+        let _ = player.advance(dt);
+
+        // Cyclic state machine travel
+        let mut sm = AnimationNodeStateMachine::new();
+        sm.add_state("A", "c1");
+        sm.add_state("B", "c2");
+        sm.add_state("C", "c3");
+        sm.add_transition(StateTransition::new("A", "B", 0.1));
+        sm.add_transition(StateTransition::new("B", "C", 0.1));
+        sm.add_transition(StateTransition::new("C", "A", 0.1));
+
+        let path = sm.travel("C");
+        prop_assert!(path.is_ok(), "travel must succeed on cyclic graph: {path:?}");
+    }
+
+    /// Wave 3A Deliverable 3: AStarGrid2D pathfinding proptest
+    #[test]
+    fn test_astar_grid_2d_pathfinding_proptest(
+        sx in 0i32..16,
+        sy in 0i32..16,
+        tx in 0i32..16,
+        ty in 0i32..16,
+    ) {
+        let mut grid = AStarGrid2D::new([0, 0], [15, 15], [32.0, 32.0]);
+        // Put a solid obstacle at (8, 8)
+        grid.set_point_solid([8, 8], true);
+
+        if let Some(path) = grid.find_path([sx, sy], [tx, ty]) {
+            prop_assert_eq!(path.first(), Some(&[sx, sy]));
+            prop_assert_eq!(path.last(), Some(&[tx, ty]));
+            for p in &path {
+                prop_assert!(grid.is_in_bounds(*p));
+                prop_assert!(!grid.is_point_solid(*p));
+            }
+        }
+    }
+
+    /// Wave 3A Deliverable 4: CharacterBody and DSP Limiter proptest
+    #[test]
+    fn test_character_body_and_dsp_finite_proptest(
+        vx in -100.0f32..100.0,
+        vy in -100.0f32..100.0,
+        vz in -100.0f32..100.0,
+        amp_l in -50.0f32..50.0,
+        amp_r in -50.0f32..50.0,
+    ) {
+        let world = PhysicsWorldState::new();
+        let id = NodeId::new(99, 1).unwrap();
+        let mut body = CharacterBody3D::new(id, bevy_math::Vec3::new(0.0, 1.0, 0.0), Collider3D::Sphere { radius: 0.5 });
+        body.velocity = bevy_math::Vec3::new(vx, vy, vz);
+        let ret_vel = body.move_and_slide(0.016, &world);
+
+        prop_assert!(body.position.is_finite());
+        prop_assert!(body.velocity.is_finite());
+        prop_assert!(ret_vel.is_finite());
+
+        let mut limiter = AudioEffectLimiter::new(0.0);
+        let (out_l, out_r) = limiter.process_stereo(amp_l, amp_r);
+        prop_assert!(out_l.is_finite());
+        prop_assert!(out_r.is_finite());
+    }
+
+    /// Wave 3B Proptest: Polyamour primitive procedural triangulation invariants
+    #[test]
+    fn test_polyamour_cube_triangulation_proptest(size in 0.01f32..100.0) {
+        let cube = foreplay_polyamour::primitives::primitive_cube(size);
+        let tri = cube.triangulate();
+        prop_assert_eq!(tri.indices.len() % 3, 0);
+        for &idx in &tri.indices {
+            prop_assert!((idx as usize) < tri.positions.len());
+        }
+        for p in &tri.positions {
+            prop_assert!(p.x.is_finite() && p.y.is_finite() && p.z.is_finite());
+        }
+    }
+
+    /// Wave 3B Proptest: Three.js JSON feel spec roundtrip invariance
+    #[test]
+    fn test_threejs_scene_feel_proptest(pop_force in 1.0f64..1000.0) {
+        let mut scene = IrScene::new("PropScene");
+        scene.feel_overrides.insert("skate.pop_force".into(), pop_force);
+        let json_str = foreplay_threejs::export_ir_to_threejs_json(&scene);
+        let recovered = foreplay_threejs::import_threejs_json_to_ir(&json_str).unwrap();
+        let val = recovered.feel_overrides.get("skate.pop_force").copied().unwrap();
+        prop_assert!((val - pop_force).abs() < 1e-4);
+    }
+
+    /// Wave 3B Proptest: Micro-Nanite meshlet partition bounding invariants
+    #[test]
+    fn test_meshlet_bounding_proptest(dim in 0.1f32..50.0) {
+        let cube = foreplay_polyamour::primitives::primitive_cube(dim).triangulate();
+        let positions: Vec<[f32; 3]> = cube.positions.iter().map(|p| [p.x, p.y, p.z]).collect();
+        let meshlets = foreplay_render::meshlet::build_meshlets(&positions, &cube.indices);
+        for m in &meshlets {
+            prop_assert!(m.vertices.len() <= foreplay_render::meshlet::MAX_MESHLET_VERTICES);
+            prop_assert!(m.triangles.len() <= foreplay_render::meshlet::MAX_MESHLET_TRIANGLES);
+            prop_assert!(m.radius >= 0.0 && m.radius.is_finite());
+            prop_assert!(m.center.x.is_finite() && m.center.y.is_finite() && m.center.z.is_finite());
+        }
+    }
 }
 
 /// Wave 2 Exit Gate: 10,000-Step Stateful Undo/Redo Marathon
@@ -373,11 +559,11 @@ fn test_frame_differential_verdict_adversarial_oracle() {
     );
 }
 
-/// Unit test verifying all 20 adversarial suites via public run_all_adversarial_suites() API.
+/// Unit test verifying all 30 adversarial suites via public run_all_adversarial_suites() API.
 #[test]
 fn test_run_all_adversarial_suites_receipts() {
     let receipts = run_all_adversarial_suites();
-    assert_eq!(receipts.len(), 20);
+    assert_eq!(receipts.len(), 30);
     for r in &receipts {
         assert!(
             r.invariants_held,
@@ -447,4 +633,85 @@ fn test_project_exporter_bundle_invariants_suite() {
     assert!(r.invariants_held, "project exporter bundle suite failed invariants!");
     assert!(r.cases_executed > 0);
 }
+
+/// Unit test verifying Wave 3A Godot Control UI Layout & Container Solver fuzzer.
+#[test]
+fn test_ui_layout_container_solver_suite() {
+    let r = verify_ui_layout_container_solver_suite();
+    assert!(r.invariants_held, "ui layout container solver suite failed invariants!");
+    assert!(r.cases_executed > 0);
+}
+
+/// Unit test verifying Wave 3A AnimationPlayer & AnimationNodeStateMachine fuzzer.
+#[test]
+fn test_animation_state_machine_fuzzer_suite() {
+    let r = verify_animation_state_machine_fuzzer_suite();
+    assert!(r.invariants_held, "animation state machine suite failed invariants!");
+    assert!(r.cases_executed > 0);
+}
+
+/// Unit test verifying Wave 3A 2D/3D Navigation & TileMapLayer Autotile fuzzer.
+#[test]
+fn test_navigation_and_autotile_fuzzer_suite() {
+    let r = verify_navigation_and_autotile_fuzzer_suite();
+    assert!(r.invariants_held, "navigation and autotile suite failed invariants!");
+    assert!(r.cases_executed > 0);
+}
+
+/// Unit test verifying Wave 3A CharacterBody move_and_slide & 5-Effect Audio DSP fuzzer.
+#[test]
+fn test_physics_and_audio_dsp_fuzzer_suite() {
+    let r = verify_physics_and_audio_dsp_fuzzer_suite();
+    assert!(r.invariants_held, "physics and audio dsp suite failed invariants!");
+    assert!(r.cases_executed > 0);
+}
+
+/// Unit test verifying Wave 3B Polyamour topology, edit operations, and modifiers fuzzer.
+#[test]
+fn test_polyamour_topology_and_modifiers_suite() {
+    let r = verify_polyamour_topology_and_modifiers_suite();
+    assert!(r.invariants_held, "polyamour topology suite failed invariants!");
+    assert!(r.cases_executed > 0);
+}
+
+/// Unit test verifying Wave 3B Polyamour hostile blend headers, foreign asset import & atomic polyops fuzzer.
+#[test]
+fn test_polyamour_blend_io_and_polyops_hostile_suite() {
+    let r = verify_polyamour_blend_io_and_polyops_hostile_suite();
+    assert!(r.invariants_held, "polyamour blend io suite failed invariants!");
+    assert!(r.cases_executed > 0);
+}
+
+/// Unit test verifying Wave 3B Three.js compiler & bidirectional roundtrip suite.
+#[test]
+fn test_threejs_compiler_and_bidirectional_roundtrip_suite() {
+    let r = verify_threejs_compiler_and_bidirectional_roundtrip_suite();
+    assert!(r.invariants_held, "threejs compiler suite failed invariants!");
+    assert!(r.cases_executed > 0);
+}
+
+/// Unit test verifying Wave 3B UE6 speculative rollback determinism & subtree lease suite.
+#[test]
+fn test_ue6_speculative_rollback_determinism_suite() {
+    let r = verify_ue6_speculative_rollback_determinism_suite();
+    assert!(r.invariants_held, "ue6 speculative rollback suite failed invariants!");
+    assert!(r.cases_executed > 0);
+}
+
+/// Unit test verifying Wave 3B Micro-Nanite meshlet & shaded PBR perceptual suite.
+#[test]
+fn test_meshlet_and_pbr_perceptual_suite() {
+    let r = verify_meshlet_and_pbr_perceptual_suite();
+    assert!(r.invariants_held, "meshlet and pbr perceptual suite failed invariants!");
+    assert!(r.cases_executed > 0);
+}
+
+/// Unit test verifying Wave 3B TriMesh BVH, GJK convex symmetry, 6-body ragdoll & moan timeline suite.
+#[test]
+fn test_trimesh_gjk_ragdoll_and_moan_timeline_suite() {
+    let r = verify_trimesh_gjk_ragdoll_and_moan_timeline_suite();
+    assert!(r.invariants_held, "trimesh gjk ragdoll timeline suite failed invariants!");
+    assert!(r.cases_executed > 0);
+}
+
 

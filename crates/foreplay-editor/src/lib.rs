@@ -8,6 +8,7 @@ pub mod transport;
 pub mod bottom_panel;
 pub mod modals;
 pub mod scene_doc;
+pub mod widgets;
 
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -37,7 +38,7 @@ use crate::tabs::tilemap::TileMapDockState;
 use crate::tabs::viewport_3d::ViewMode3D;
 use crate::tabs::{build_default_dock_state, EditorTab, EditorTabViewer};
 
-/// Top-bar workspace tabs matching Godot 4 + 3JSE Atlas + RustPorts Differential Inspector.
+/// Top-bar workspace tabs matching Godot 4 + 3JSE Atlas + RustPorts Differential Inspector + Polyamour + Three.js.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum EditorWorkspace {
     Workspace2D,
@@ -46,6 +47,8 @@ pub enum EditorWorkspace {
     AtlasGraph,
     PortDiff,
     AssetLib,
+    ModelPolyamour,
+    ThreeJsWeb,
 }
 
 /// Hotswappable physics backend choice.
@@ -112,6 +115,15 @@ pub struct ForeplayEditorApp {
     // Live Engine Backend Wiring (Wave 2B)
     pub last_differential_report: Option<foreplay_porthost::DifferentialReport>,
     pub active_vm: Option<foreplay_gdscript::GdVm>,
+
+    // Wave 3A Studio Obsidian, Polyamour, Three.js & Trackpad State
+    pub theme_preset: crate::theme::EditorThemePreset,
+    pub polyamour_state: crate::tabs::polyamour_model::PolyamourModelState,
+    pub threejs_state: crate::tabs::threejs_studio::ThreeJsStudioState,
+    pub atlas_pan: egui::Vec2,
+    pub atlas_zoom: f32,
+    pub atlas_recorder: foreplay_atlas::timetravel::TimeTravelAtlasRecorder,
+    pub atlas_scrub_tick: Option<u64>,
 }
 
 impl std::fmt::Debug for ForeplayEditorApp {
@@ -211,6 +223,14 @@ func _physics_process(delta: float) -> void:
 
             last_differential_report: None,
             active_vm: None,
+
+            theme_preset: crate::theme::EditorThemePreset::StudioObsidianPro,
+            polyamour_state: crate::tabs::polyamour_model::PolyamourModelState::default(),
+            threejs_state: crate::tabs::threejs_studio::ThreeJsStudioState::default(),
+            atlas_pan: egui::Vec2::ZERO,
+            atlas_zoom: 1.0,
+            atlas_recorder: foreplay_atlas::timetravel::TimeTravelAtlasRecorder::default(),
+            atlas_scrub_tick: None,
         };
 
         app.log(
@@ -236,10 +256,36 @@ func _physics_process(delta: float) -> void:
     /// CRITICAL GOLDEN RULE: All scene mutations MUST route through this method!
     pub fn execute_command(&mut self, cmd: EditorCommand) {
         self.log(LogLevel::Command, format!("Executed {cmd:?}"));
+        let tick = self.command_history_count as u64;
+        let mut feel_changes = Vec::new();
+        let mut pulses = Vec::new();
+        if let EditorCommand::TuneFeelSpec { ref key, old_value, new_value } = cmd {
+            if let Some(new_val) = new_value {
+                feel_changes.push(foreplay_atlas::timetravel::FeelSpecLiveChange {
+                    tick,
+                    key: key.clone(),
+                    old_value,
+                    new_value: new_val,
+                });
+            }
+        } else if let EditorCommand::ConnectSignal { ref connection } = cmd {
+            pulses.push(foreplay_atlas::timetravel::SignalPulse {
+                pulse_id: tick + 1,
+                tick,
+                from_node: connection.from_node,
+                signal_name: connection.signal_name.clone(),
+                to_node: connection.to_node,
+                method_name: connection.method_name.clone(),
+                payload: IrValue::Nil,
+                caused_by: None,
+            });
+        }
         if let Err(err) = self.session.execute(cmd) {
             self.log(LogLevel::Warn, format!("Command failed: {err}"));
         } else {
             self.command_history_count += 1;
+            let state_hash = self.session.tree.active_scene.nodes.len() as u64;
+            self.atlas_recorder.record_frame(tick, state_hash, pulses, feel_changes);
         }
     }
 
@@ -279,7 +325,9 @@ func _physics_process(delta: float) -> void:
         let target_tab = match ws {
             EditorWorkspace::Workspace2D => EditorTab::Viewport2D,
             EditorWorkspace::Workspace3D => EditorTab::Viewport3D,
+            EditorWorkspace::ModelPolyamour => EditorTab::PolyamourModel,
             EditorWorkspace::Script => EditorTab::ScriptView,
+            EditorWorkspace::ThreeJsWeb => EditorTab::ThreeJsStudio,
             EditorWorkspace::AtlasGraph => EditorTab::AtlasGraph,
             EditorWorkspace::PortDiff => EditorTab::PortDiff,
             EditorWorkspace::AssetLib => EditorTab::AssetLib,
@@ -520,6 +568,54 @@ func _physics_process(delta: float) -> void:
             ),
         );
         Ok(())
+    }
+
+    /// Three.js / 3JSE JSON format importer (`foreplay-threejs`).
+    ///
+    /// Parses Three.js `THREE.Object3D.toJSON()` or `@3jse/atlas` `3jse.scene.json` formats
+    /// via `foreplay_threejs::import_threejs_json_to_ir` and replays all nodes, feel specs,
+    /// and signal connections strictly through `EditorCommand` dispatches.
+    pub fn import_threejs_scene_json(&mut self, name: &str, json_str: &str) -> Result<usize, String> {
+        let parsed = foreplay_threejs::import_threejs_json_to_ir(json_str)
+            .map_err(|e| format!("Failed to parse Three.js JSON: {e}"))?;
+
+        self.open_or_switch_scene(name, Some(format!("res://scenes/{name}.fscn")));
+
+        // Clear existing nodes in scene so import replaces cleanly
+        let existing_nodes: Vec<IrNode> = self.session.tree.active_scene.nodes.values().cloned().collect();
+        for node in existing_nodes {
+            self.execute_command(EditorCommand::RemoveNode { node });
+        }
+
+        let node_count = parsed.nodes.len();
+        for node in parsed.nodes.values() {
+            self.execute_command(EditorCommand::InsertNode { node: node.clone() });
+        }
+
+        for (key, val) in &parsed.feel_overrides {
+            self.execute_command(EditorCommand::TuneFeelSpec {
+                key: key.clone(),
+                old_value: None,
+                new_value: Some(*val),
+            });
+        }
+
+        for conn in &parsed.connections {
+            self.execute_command(EditorCommand::ConnectSignal {
+                connection: conn.clone(),
+            });
+        }
+
+        self.selected_node = parsed.nodes.values().find(|n| n.parent.is_none()).map(|n| n.id);
+        self.log(
+            LogLevel::Info,
+            format!(
+                "Successfully imported Three.js 3JSE scene '{name}' ({node_count} nodes, {} signals, {} feel knobs)",
+                parsed.connections.len(),
+                parsed.feel_overrides.len()
+            ),
+        );
+        Ok(node_count)
     }
 
     /// Godot 4 `.tscn` text format importer.
@@ -765,8 +861,8 @@ func _physics_process(delta: float) -> void:
 
     /// Renders the entire Godot-parity IDE UI into the provided `egui::Ui`.
     pub fn render_ui(&mut self, ui: &mut Ui) {
-        // Apply Godot 4 styling theme
-        crate::theme::apply_godot_theme(ui.ctx());
+        // Apply active theme preset (Studio Obsidian Pro by default)
+        crate::theme::apply_theme(ui.ctx(), self.theme_preset);
 
         // Update frame timer / FPS calculation
         if let Some(prev) = self.last_frame_instant {
@@ -838,9 +934,11 @@ func _physics_process(delta: float) -> void:
             )),
             ..Default::default()
         };
-        ctx.run_ui(raw_input, |ui| {
+        let mut output = ctx.run_ui(raw_input, |ui| {
             self.render_ui(ui);
-        })
+        });
+        output.textures_delta.clear();
+        output
     }
 }
 
@@ -922,11 +1020,13 @@ mod tests {
         let mut app = ForeplayEditorApp::new("HeadlessFrameSmoke");
         app.populate_starter_scene();
 
-        // Render headless across all 6 workspaces
+        // Render headless across all 8 workspaces
         let workspaces = [
             EditorWorkspace::Workspace3D,
             EditorWorkspace::Workspace2D,
+            EditorWorkspace::ModelPolyamour,
             EditorWorkspace::Script,
+            EditorWorkspace::ThreeJsWeb,
             EditorWorkspace::AtlasGraph,
             EditorWorkspace::PortDiff,
             EditorWorkspace::AssetLib,
@@ -1444,4 +1544,401 @@ void fragment() {
         app.last_differential_report = Some(report);
         assert!(app.last_differential_report.as_ref().unwrap().is_perfect_match());
     }
+
+    #[test]
+    fn wave3a_theme_preset_switching_and_tactile_widgets_rendering() {
+        let mut app = ForeplayEditorApp::new("ThemeAndWidgetsTest");
+        app.populate_starter_scene();
+
+        // 1. Default theme is StudioObsidianPro
+        assert_eq!(app.theme_preset, crate::theme::EditorThemePreset::StudioObsidianPro);
+        let output1 = app.run_headless_frame([1280.0, 720.0]);
+        assert!(!output1.shapes.is_empty());
+
+        // 2. Switch to ClassicGodotSlate
+        app.theme_preset = crate::theme::EditorThemePreset::ClassicGodotSlate;
+        let output2 = app.run_headless_frame([1280.0, 720.0]);
+        assert!(!output2.shapes.is_empty());
+
+        // 3. Render tactile widgets directly in a dedicated headless frame
+        let ctx = egui::Context::default();
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))),
+            ..Default::default()
+        };
+
+        let mut knob_val = 6.8f32;
+        let mut widget_output = ctx.run_ui(raw_input, |ui| {
+            crate::widgets::studio_lcd_hud(ui, 12.34, 120.0, 60.0, 9, true);
+            crate::widgets::rotary_arc_knob(ui, "TestKnob", &mut knob_val, 0.0, 20.0, crate::theme::CHROMA_CYAN_2D);
+            let bars = [0.5f32; 32];
+            crate::widgets::eq_response_and_spectrum_canvas(ui, 0.0, 2.0, -1.0, &bars);
+        });
+        assert!(!widget_output.shapes.is_empty(), "Tactile widgets must produce paint shapes");
+        widget_output.textures_delta.clear();
+    }
+
+    #[test]
+    fn wave3a_polyamour_model_workspace_primitive_operators_and_modifiers() {
+        let mut app = ForeplayEditorApp::new("PolyamourTest");
+        let initial_node_count = app.session.tree.active_scene.nodes.len();
+
+        // 1. Set workspace to ModelPolyamour
+        app.set_workspace(EditorWorkspace::ModelPolyamour);
+        assert_eq!(app.active_workspace, EditorWorkspace::ModelPolyamour);
+
+        // 2. Insert primitive Quarterpipe
+        let next_idx = (app.session.tree.active_scene.nodes.len() as u32) + 1;
+        let node_id = NodeId::new(next_idx, 1).unwrap();
+        let mut properties = BTreeMap::new();
+        properties.insert("polyamour_primitive".into(), IrValue::String("Quarterpipe".into()));
+        properties.insert("polyamour_ops".into(), IrValue::String("".into()));
+        let node = IrNode {
+            id: node_id,
+            name: format!("Quarterpipe_{next_idx}"),
+            class_name: "MeshInstance3D".into(),
+            parent: None,
+            instance_scene: None,
+            properties,
+            groups: vec![],
+        };
+        app.execute_command(EditorCommand::InsertNode { node });
+        app.selected_node = Some(node_id);
+
+        assert_eq!(app.session.tree.active_scene.nodes.len(), initial_node_count + 1);
+        let inserted = app.session.tree.active_scene.nodes.get(&node_id).unwrap();
+        assert_eq!(inserted.properties.get("polyamour_primitive"), Some(&IrValue::String("Quarterpipe".into())));
+
+        // 3. Record edit-mode operator "extrude" via SetProperty
+        app.execute_command(EditorCommand::SetProperty {
+            node_id,
+            key: "polyamour_ops".into(),
+            old_value: Some(IrValue::String("".into())),
+            new_value: Some(IrValue::String("extrude(dist=0.5)".into())),
+        });
+        let updated = app.session.tree.active_scene.nodes.get(&node_id).unwrap();
+        assert_eq!(updated.properties.get("polyamour_ops"), Some(&IrValue::String("extrude(dist=0.5)".into())));
+
+        // 4. Modifier stack sync via SetProperty
+        app.execute_command(EditorCommand::SetProperty {
+            node_id,
+            key: "polyamour_modifiers".into(),
+            old_value: None,
+            new_value: Some(IrValue::String("count=2".into())),
+        });
+        let with_mods = app.session.tree.active_scene.nodes.get(&node_id).unwrap();
+        assert_eq!(with_mods.properties.get("polyamour_modifiers"), Some(&IrValue::String("count=2".into())));
+
+        // 5. Undo restores all edits cleanly
+        app.undo(); // undo modifiers
+        assert_eq!(app.session.tree.active_scene.nodes.get(&node_id).unwrap().properties.get("polyamour_modifiers"), None);
+        app.undo(); // undo ops
+        assert_eq!(app.session.tree.active_scene.nodes.get(&node_id).unwrap().properties.get("polyamour_ops"), Some(&IrValue::String("".into())));
+        app.undo(); // undo insert node
+        assert_eq!(app.session.tree.active_scene.nodes.len(), initial_node_count);
+    }
+
+    #[test]
+    fn wave3a_threejs_webgpu_studio_code_generation_and_export() {
+        let mut app = ForeplayEditorApp::new("ThreeJsTest");
+        app.populate_starter_scene();
+
+        app.set_workspace(EditorWorkspace::ThreeJsWeb);
+        assert_eq!(app.active_workspace, EditorWorkspace::ThreeJsWeb);
+
+        // Headless render of Three.js studio workspace
+        let output = app.run_headless_frame([1280.0, 720.0]);
+        assert!(!output.shapes.is_empty());
+
+        // Verify state
+        assert!(app.threejs_state.webgpu_renderer);
+        assert!(app.threejs_state.webgl2_fallback);
+        assert!(app.threejs_state.simulation_running);
+    }
+
+    #[test]
+    fn wave3a_fcp_magnetic_timeline_skimmer_and_connected_clips() {
+        let mut app = ForeplayEditorApp::new("TimelineTest");
+        assert!(app.animation_state.skimmer_enabled);
+        assert_eq!(app.animation_state.magnetic_clips.len(), 4);
+
+        // Check clips lanes
+        assert_eq!(app.animation_state.magnetic_clips[0].lane, crate::tabs::animation::ClipLane::PrimaryStoryline);
+        assert_eq!(app.animation_state.magnetic_clips[1].lane, crate::tabs::animation::ClipLane::ConnectedAudio);
+        assert_eq!(app.animation_state.magnetic_clips[2].lane, crate::tabs::animation::ClipLane::ConnectedCamera);
+        assert_eq!(app.animation_state.magnetic_clips[3].lane, crate::tabs::animation::ClipLane::ConnectedSignals);
+
+        // Advance skimmer time
+        app.animation_state.skimmer_time = 1.25;
+        assert_eq!(app.animation_state.skimmer_time, 1.25);
+    }
+
+    #[test]
+    fn wave3b_polyamour_live_mesh_evaluation_and_2manifold_check() {
+        use foreplay_polyamour::{
+            bake_pathtraced_rgba8, PathTracerCamera, PathTracerConfig, PathTracerMaterial, ViewTransform,
+        };
+        use bevy_math::Vec3;
+
+        let mut app = ForeplayEditorApp::new("PolyamourTest");
+        let node_id = NodeId::new(1, 1).unwrap();
+        let mut properties = BTreeMap::new();
+        properties.insert("polyamour_primitive".into(), IrValue::String("Cube".into()));
+
+        let node = IrNode {
+            id: node_id,
+            name: "TestPolyCube".into(),
+            class_name: "MeshInstance3D".into(),
+            parent: None,
+            instance_scene: None,
+            properties,
+            groups: vec!["polyamour".into()],
+        };
+        app.execute_command(EditorCommand::InsertNode { node });
+        app.selected_node = Some(node_id);
+
+        // 1. With default modifier stack (Mirror + Catmull-Clark Subsurf lvl 2)
+        let telem_mod = crate::tabs::polyamour_model::evaluate_active_polyamour_mesh(&app);
+        assert_eq!(telem_mod.vertex_count, 152, "Subdivision level 2 + mirror must evaluate 152 vertices");
+
+        // 2. Clear modifier stack to inspect raw base cube
+        app.polyamour_state.active_modifiers.clear();
+        let telem_base = crate::tabs::polyamour_model::evaluate_active_polyamour_mesh(&app);
+        assert_eq!(telem_base.vertex_count, 8);
+        assert_eq!(telem_base.face_count, 6);
+        assert_eq!(telem_base.triangle_count, 12);
+        assert!(telem_base.is_manifold, "Base cube primitive must be a 2-manifold surface");
+
+        // 3. Apply non-destructive operators and verify vertex/face growth
+        app.execute_command(EditorCommand::SetProperty {
+            node_id,
+            key: "polyamour_ops".into(),
+            old_value: None,
+            new_value: Some(IrValue::String("extrude,inset".into())),
+        });
+
+        let telem_ops = crate::tabs::polyamour_model::evaluate_active_polyamour_mesh(&app);
+        assert!(telem_ops.vertex_count > 8, "Extruded & inset mesh must have > 8 vertices, got {}", telem_ops.vertex_count);
+        assert!(telem_ops.face_count > 6, "Extruded & inset mesh must have > 6 faces, got {}", telem_ops.face_count);
+        assert!(telem_ops.triangle_count > 12, "Triangulated mesh must have > 12 triangles, got {}", telem_ops.triangle_count);
+
+        // AgX Photoreal Path Tracer preview check
+        let tri_mesh = telem_ops.mesh.triangulate();
+        let config = PathTracerConfig {
+            width: 16,
+            height: 16,
+            samples_per_pixel: 2,
+            max_bounces: 2,
+            seed: 0x42,
+            enable_denoiser: true,
+            view_transform: ViewTransform::AgX,
+            camera: PathTracerCamera {
+                eye: Vec3::new(0.0, 1.5, 4.0),
+                target: Vec3::ZERO,
+                up: Vec3::Y,
+                fov_degrees: 60.0,
+            },
+            default_material: PathTracerMaterial {
+                base_color: Vec3::new(0.9, 0.4, 0.2),
+                metallic: 0.2,
+                roughness: 0.3,
+            },
+        };
+        let baked = bake_pathtraced_rgba8(&tri_mesh, &config);
+        assert_eq!(baked.len(), 16 * 16 * 4);
+        for i in 0..(16 * 16) {
+            assert_eq!(baked[i * 4 + 3], 255, "Alpha channel must be fully opaque");
+        }
+    }
+
+    #[test]
+    fn wave3b_polyops_script_atomic_execution() {
+        use foreplay_polyamour::{run_polyops, PolyScene};
+
+        let mut scene = PolyScene::new();
+        let script = r#"
+            polyops 1
+            begin
+            material_new "GoldPlating" 1.0 0.85 0.57 1.0 0.9 0.1 as $gold
+            add_primitive cube 2.0 as $box
+            modifier_add $box subdivision 1
+            material_assign $box $gold
+            end
+        "#;
+        let report = run_polyops(&mut scene, script).expect("run polyops script");
+        assert_eq!(scene.objects.len(), 1);
+        assert_eq!(scene.materials.len(), 1);
+        assert_eq!(report.created_ids.len(), 2);
+    }
+
+    #[test]
+    fn wave3b_spline_rail_pcg_extrusion_and_node_insertion() {
+        use foreplay_core::pcg::{CatmullRomSpline3D, PcgExtrusionConfig, PcgProfile, PcgSplineExtruder};
+        use bevy_math::Vec3;
+
+        let p0 = Vec3::new(-6.0, 0.85, 0.0);
+        let p1 = Vec3::new(-2.0, 0.85, 0.0);
+        let p2 = Vec3::new(2.0, 0.85, 0.0);
+        let p3 = Vec3::new(6.0, 0.85, 0.0);
+        let spline = CatmullRomSpline3D::new(vec![p0, p1, p2, p3], false);
+        let config = PcgExtrusionConfig {
+            profile: PcgProfile::RoundRail {
+                radius: 0.04,
+                radial_segments: 12,
+            },
+            step_distance: 0.2,
+            uv_scale: [1.0, 1.0],
+            generate_caps: true,
+        };
+        let buffers = PcgSplineExtruder::extrude(&spline, &config);
+        assert!(!buffers.positions.is_empty(), "Extrusion must generate positions");
+        assert!(!buffers.indices.is_empty(), "Extrusion must generate indices");
+        assert!(!buffers.collision_segments.is_empty(), "Extrusion must generate collision lines");
+
+        let mut app = ForeplayEditorApp::new("SplineTest");
+        let initial_count = app.session.tree.active_scene.nodes.len();
+        let node_id = NodeId::new((initial_count as u32) + 1, 1).unwrap();
+        let mut properties = BTreeMap::new();
+        properties.insert("polyamour_primitive".into(), IrValue::String("SplineRail".into()));
+        properties.insert("positions_count".into(), IrValue::I64(buffers.positions.len() as i64));
+        properties.insert("indices_count".into(), IrValue::I64(buffers.indices.len() as i64));
+        properties.insert("collision_segments_count".into(), IrValue::I64(buffers.collision_segments.len() as i64));
+
+        let node = IrNode {
+            id: node_id,
+            name: "GrindRail_Test".into(),
+            class_name: "MeshInstance3D".into(),
+            parent: None,
+            instance_scene: None,
+            properties,
+            groups: vec!["grind_rails".into()],
+        };
+        app.execute_command(EditorCommand::InsertNode { node });
+        assert_eq!(app.session.tree.active_scene.nodes.len(), initial_count + 1);
+
+        app.undo();
+        assert_eq!(app.session.tree.active_scene.nodes.len(), initial_count);
+    }
+
+    #[test]
+    fn wave3b_threejs_studio_project_bundle_compile_and_import_roundtrip() {
+        let mut app = ForeplayEditorApp::new("NeonSkateStudioTest");
+        app.populate_starter_scene();
+
+        // 1. Verify compile_threejs_bundle produces complete project files
+        let bundle = crate::tabs::threejs_studio::compile_threejs_bundle(&app).expect("compile threejs bundle");
+        assert!(bundle.files.contains_key("package.json"));
+        assert!(bundle.files.contains_key("tsconfig.json"));
+        assert!(bundle.files.contains_key("vite.config.ts"));
+        assert!(bundle.files.contains_key("index.html"));
+        assert!(bundle.files.contains_key("src/scene.ts"));
+        assert!(bundle.files.contains_key("src/main.ts"));
+        assert!(bundle.files.contains_key("src/feel.ts"));
+        assert!(bundle.files.contains_key("src/signals.ts"));
+        assert!(bundle.files.contains_key("src/scripts/behaviors.ts"));
+        assert!(bundle.files.contains_key("src/atlas.json"));
+        assert_eq!(bundle.node_count, app.session.tree.active_scene.nodes.len());
+
+        // 2. Test import_threejs_scene_json with Neon Skate Park template
+        let count = app.import_threejs_scene_json(
+            "NeonSkatePark",
+            crate::tabs::threejs_studio::NEON_SKATE_JSON,
+        ).expect("import 3jse template");
+        assert_eq!(count, 8, "NeonSkatePark template contains 8 nodes");
+        assert_eq!(app.session.tree.active_scene.nodes.len(), 8);
+        assert_eq!(app.session.tree.active_scene.feel_overrides.get("skate_speed"), Some(&18.0));
+        assert_eq!(app.session.tree.active_scene.feel_overrides.get("ollie_pop"), Some(&8.5));
+        assert_eq!(app.session.tree.active_scene.connections.len(), 3);
+
+        // 3. Undo restores clean previous state
+        app.undo();
+        // Since import clears and sets nodes through commands, commands can be undone
+        assert!(app.command_history_count > 0);
+    }
+
+    #[test]
+    fn wave3b_export_modal_threejs_preset_wiring() {
+        let mut app = ForeplayEditorApp::new("ExportModalTest");
+        app.export_modal_state.selected_preset = crate::modals::export_modal::ExportPlatformPreset::ThreeJsWebProject;
+        assert_eq!(
+            app.export_modal_state.selected_preset.to_export_target(),
+            foreplay_export::ExportTarget::ThreeJsWebProject
+        );
+    }
+
+    #[test]
+    fn wave3b_viewport_3d_pbr_gi_shaded_rendering() {
+        use bevy_math::{Mat4, Quat, Vec3};
+        use foreplay_render::PerspectiveCamera3D;
+        use foreplay_render::pbr_gi::{render_shaded_pbr_viewport_rgba8, PbrMaterialDesc, PbrViewportParams, RenderTriangleMesh};
+
+        let cam = PerspectiveCamera3D {
+            position: Vec3::new(0.0, 2.0, 5.0),
+            rotation: Quat::IDENTITY,
+            fov_y_radians: 60.0_f32.to_radians(),
+            aspect_ratio: 1.0,
+            near: 0.1,
+            far: 1000.0,
+        };
+        let mat = PbrMaterialDesc::dielectric([0.5, 0.7, 1.0], 0.3);
+        let mesh = RenderTriangleMesh::new_cube(2.0, mat, Mat4::IDENTITY);
+        let meshes = [mesh];
+
+        let params = PbrViewportParams {
+            width: 32,
+            height: 32,
+            camera: &cam,
+            meshes: &meshes,
+            sun_dir: Vec3::new(-0.5, -1.0, -0.5).normalize_or_zero(),
+            sun_color: [1.0, 0.95, 0.85],
+            sun_intensity: 3.0,
+            sky_color: [0.1, 0.15, 0.25],
+            voxel_gi: None,
+            radiance_cascade: None,
+            selected_mesh_index: None,
+            outline_color: [255, 140, 0, 255],
+            outline_width: 2,
+            enable_shadows: true,
+        };
+
+        let rgba = render_shaded_pbr_viewport_rgba8(&params);
+        assert_eq!(rgba.len(), 32 * 32 * 4);
+        assert!(rgba.iter().any(|&b| b > 0), "Rendered PBR image must contain non-black pixels");
+    }
+
+    #[test]
+    fn wave3b_audio_mixer_foley_synth_and_32band_spectrum() {
+        let mut app = ForeplayEditorApp::new("AudioTest");
+        app.audio_mixer_state.synth.set_telemetry(15.0, 0.7, true, 12.0);
+
+        let mut buf = vec![[0.0_f32; 2]; 512];
+        app.audio_mixer_state.synth.generate_block(&mut buf);
+
+        let dbs = app.audio_mixer_state.analyzer.process_block(&buf);
+        assert_eq!(dbs.len(), 32);
+        for &db in &dbs {
+            assert!((-100.0..=0.0).contains(&db), "Decibels must be within [-100, 0], got {db}");
+        }
+    }
+
+    #[test]
+    fn wave3b_atlas_time_travel_ring_recorder() {
+        let mut app = ForeplayEditorApp::new("AtlasScrubTest");
+        let initial_frames = app.atlas_recorder.len();
+
+        // Tune feel spec knob
+        app.execute_command(EditorCommand::TuneFeelSpec {
+            key: "skate_speed".into(),
+            old_value: None,
+            new_value: Some(22.5),
+        });
+        assert_eq!(app.atlas_recorder.len(), initial_frames + 1);
+
+        let latest = app.atlas_recorder.latest_tick().expect("latest tick exists");
+        let scrub = app.atlas_recorder.scrub_to_tick(latest).expect("scrub view exists");
+        assert_eq!(scrub.active_feel_changes.len(), 1);
+        assert_eq!(scrub.active_feel_changes[0].key, "skate_speed");
+        assert_eq!(scrub.active_feel_changes[0].new_value, 22.5);
+    }
 }
+

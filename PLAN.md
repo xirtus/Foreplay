@@ -5,43 +5,45 @@ Follows the [RustPorts Methodology](https://github.com/rustports/docs/blob/main/
 ## CHECKPOINT
 
 ```text
-PHASE: 0-6 COMPLETE (100% Plan & Godot 4.4 Parity Achieved across 15 Crates)
-SUBSTRATE: Bevy 0.20.1 (bevy_ecs, bevy_reflect, bevy_math) + egui 0.36 / egui_dock 0.21.1
-UPSTREAM_REFERENCE: godotengine/godot 4.4-stable + skate2-rust-port + 3JSE
+PHASE: 0-11 COMPLETE (v0.2.0 World-Class Studio Edition — 100% Green across 17 Crates)
+SUBSTRATE: Bevy 0.20.1 (bevy_ecs, bevy_reflect, bevy_math) + egui 0.36 / egui_dock 0.21.1 + Three.js ^0.174.0 (3JSE)
+UPSTREAM_REFERENCE: godotengine/godot 4.4 + Polyamour (sex-3d) + Moan (moan-core) + 3JSE + skate2-rust-port + UE6
 WORKSPACE_COMPILE: GREEN (0 clippy warnings under -D warnings, 0 todo!/unimplemented! stubs)
-WORKSPACE_TESTS: 100% GREEN (All 15 crates: Unit + Integration + 20 Adversarial Proptest Suites)
+WORKSPACE_TESTS: 100% GREEN (All 17 crates: Unit + Integration + 30 Adversarial Proptest Suites)
 PHASE_1_TSCN_GATE: 200 / 200 Godot 4 .tscn fixtures bidirectional round-trip PASS
-PHASE_2_AGENT_GATE: 300-tick headless AI playtest + live FeelSpec tuning + MCP JSON-RPC 2.0 PASS
-PHASE_3_RENDER_GATE: 10,000-entity 3D benchmark >240 FPS (0 steady-state heap allocations) + .gdshader->WGSL PASS
-PHASE_4_EDITOR_GATE: 6/6 Workspaces + 7/7 Bottom Docks + 5/5 Modals + 63-Class Catalog + Live PIE/GdVm PASS
-PHASE_5_ORACLE_GATE: 1,000 / 1,000 frames <= 1e-4m drift + live A/B physics hotswap + foreplay-server PASS
-PHASE_6_EXPORT_GATE: 5 / 5 Release Targets (.fpck + Linux/SteamDeck, Windows, macOS Game Mode .app, WebGPU, SexOS .sexpkg) PASS
-ADVERSARIAL_SUITES_ACTIVE: 20 / 20 (10k Undo/Redo Marathon, Bevy Relations, .fscn/.tscn/.gd/.gdshader/.fpck/GdVm/QuickJS Fuzzers)
+PHASE_2_AGENT_GATE: 300-tick headless AI playtest + live FeelSpec + 600-frame Time-Travel + Subtree Leases PASS
+PHASE_3_9_SERVERS_GATE: Shaded PBR + Radiance Cascades/Voxel GI + AgX + Meshlets + 10k 0-alloc + TriMesh/GJK/Ragdoll + Moan 48kHz Audio PASS
+PHASE_7_POLYAMOUR_GATE: HalfEdgeMesh + Edit Ops + 9 Modifiers + .blend/GLTF/OBJ/STL/PLY + polyops 1 + SAH BVH AgX Path Tracer PASS
+PHASE_8_THREEJS_GATE: Runnable Vite + TypeScript + Three.js WebGPU Project Compiler + Bidirectional 3jse.scene.json Round-Trip PASS
+PHASE_10_STUDIO_UX_GATE: StudioObsidianPro Theme + LCD HUD + Rotary Knobs + FCP Magnetic Timeline + 8/8 Workspaces + 7/7 Docks + 5/5 Modals PASS
+ADVERSARIAL_SUITES_ACTIVE: 30 / 30 (Undo/Redo 10k, Bevy Relations, Polyamour Topology, .blend/polyops, Three.js, UE6 Rollback, Meshlets, Moan Audio)
 ```
 
 ---
 
-## 1. Subsystem Inventory & Classification (15 Workspace Crates)
+## 1. Subsystem Inventory & Classification (17 Workspace Crates)
 
 Every deliverable carries an explicit classification tag (`[mechanical]`, `[semantic]`, or `[uncertain]`) to route work cleanly between **Gemini 4 Carbon** (deep invariants & unsafe audits) and **Gemini 4 Hydrogen** (UI loops & `/teamwork-preview` porting waves).
 
 | Crate | License | Purpose | Upstream Reference | Classification | Owner Track |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `foreplay-ir` | `MPL-2.0` | Canonical Gameplay IR, generational IDs, 63-class Godot 4.4 catalog, `ProjectSettingsIr`/`InputMapIr`, 10-variant invertible `EditorCommand`, `.fscn` codec | 3JSE Gameplay IR + Godot `ClassDB`/`PackedScene` | `[semantic]` | Carbon (High) |
-| `foreplay-core` | `MPL-2.0` | Bevy `0.20.1` `SceneTree` (`ChildOf`/`Children`, `RequiredComponents`, Observers), `PackedScene` layering, `AnimationPlayer`/StateMachine, `Control` anchors/containers, `TileMapLayer`/`AStarGrid2D`/`NavMesh3D` | Godot `scene/{main,animation,gui,2d,3d}/` | `[semantic]` | Carbon (High) |
+| `foreplay-core` | `MPL-2.0` | Bevy `0.20.1` `SceneTree`, `AnimationPlayer`/StateMachine, `Control` layout, `TileMapLayer`/Nav, UE6 `SpeculativeFrameBuffer` rollback, 3D Spline PCG, IK & Motion Matching | Godot `scene/` + UE6 Verse/PCG/PoseSearch | `[semantic]` | Carbon (High) |
+| `foreplay-polyamour` | `MPL-2.0` | `PolyMesh` + `HalfEdgeMesh`, 10 primitives, Blender Edit ops (`extrude`, `inset`, `bevel`, `loop_cut`, `boolean_csg`), 9 modifiers, `.blend`/GLTF/OBJ/STL/PLY I/O, `polyops 1`, SAH BVH AgX path tracer | SexOS Polyamour (`sex-3d`) + Blender | `[semantic]` | Carbon (High) |
 | `foreplay-platform` | `MPL-2.0` | Input actions (`get_vector`), `StickCalibration` radial deadzone/anti-deadzone, `DisplaySettings`, clipboard/cursor, and `SexOsScanoutSurface` (`Silk` + `egui`) | Godot `DisplayServer` + `skate2-rust-port` + SexOS | `[semantic]` | Carbon (High) |
-| `foreplay-render` | `MPL-2.0` | `RenderingServer` RIDs, `.gdshader` & VisualShader -> WGSL compiler, 6-plane SoA frustum culler, `GpuParticles3DSim`, 10k-entity 0-alloc benchmark, RGBA8 golden rasterizer | Godot `servers/rendering/` | `[semantic]` | Carbon (High) |
-| `foreplay-physics` | `MPL-2.0` | Hotswappable `PhysicsServer3D` (`StandardRigidBackend` <-> `SkatePortArcadeBackend`), `CharacterBody3D`/`2D::move_and_slide`, ray/shape casts, `Area3D`, 3D joints | Godot `PhysicsServer2D/3D` + `skate2-rust-port` | `[semantic]` | Carbon (High) |
-| `foreplay-audio` | `MPL-2.0` | Multi-bus `AudioServer` (`Master`, `Music`, `Sfx`, `Voice`), stereo `BusVuMeter`, 5 stereo DSP effects (Reverb, EQ3, Limiter, LowPass, Chorus), WAV/XMA codecs | Godot `AudioServer` + `skate2-xma` | `[mechanical]` | Carbon (High) |
+| `foreplay-render` | `MPL-2.0` | `RenderingServer` RIDs, `.gdshader` -> WGSL, Shaded PBR + Radiance Cascades/Voxel GI + AgX rasterizer, 64-vert Meshlets, SSIM/PSNR perceptual gate, 10k-entity 0-alloc benchmark | Godot `servers/rendering/` + UE5 Lumen/Nanite | `[semantic]` | Carbon (High) |
+| `foreplay-physics` | `MPL-2.0` | Hotswappable `PhysicsServer3D`, 2D/3D `move_and_slide`, SAH BVH `TriMeshCollider3D` (curved skate bowls), `ConvexHullCollider3D` GJK, `RagdollRig3D`, 3D joints | Godot `PhysicsServer3D` + `skate2-rust-port` | `[semantic]` | Carbon (High) |
+| `foreplay-audio` | `MPL-2.0` | Multi-bus `AudioServer`, 5 DSP effects, `moan-core` 48kHz non-destructive `AudioTimeline` (`split_at`/`trim`/fades), `SkateFoleySynth`, 3D HRTF/Doppler, 32-band FFT spectrum | Godot `AudioServer` + SexOS `moan-core` + MetaSounds | `[semantic]` | Carbon (High) |
 | `foreplay-net` | `MPL-2.0` | Zero-panic `CompactReplayFrame` wire codec, `ReplayInterpolationBuffer`, `DeterministicLockstepBuffer`, 8-player `LobbySession`, standalone `foreplay-server` CLI | `skate2-rust-port` online netcode | `[semantic]` | Carbon (High) |
 | `foreplay-script` | `MPL-2.0` | `ScriptRegistry` hot-reload revisioning + zero-compile TypeScript/JS `QuickJsComponentRunner` (`onReady`/`onUpdate`/`onPhysicsUpdate` + `FeelSpec` bindings) | `rustports/quickjs` + 3JSE TS runtime | `[semantic]` | Hydrogen |
 | `foreplay-gdscript` | `MPL-2.0` | Godot 4 `.gd` AST parser (`@export_range` -> `FeelSpecKnob`, `signal`) + deterministic step-budgeted `GdVm` interpreter | Godot `modules/gdscript/` | `[mechanical]` | Hydrogen (`/teamwork-preview`) |
-| `foreplay-atlas` | `GPL-3.0-only` | Semantic meaning graph compiler, topological layout, `VisualGraph` execution, `FeelSpecValidator`, blast-radius task context, `AtlasHealthReport` | 3JSE `@3jse/atlas` | `[semantic]` | Carbon (High) |
+| `foreplay-atlas` | `GPL-3.0-only` | Semantic meaning graph compiler, `VisualGraph`, `FeelSpecValidator`, blast-radius context, 600-frame `TimeTravelAtlasRecorder`, and `SubtreeLeaseManager` | 3JSE `@3jse/atlas` | `[semantic]` | Carbon (High) |
+| `foreplay-threejs` | `GPL-3.0-only` | Runnable 3JSE / Three.js (`WebGPURenderer` + Vite + TS + Polyamour `BufferGeometry` + `FeelSpec` DevHUD + GDScript->TS) project compiler & bidirectional `THREE.Object3D` importer | 3JSE (`3jse.com`) + `three` r174 | `[mechanical]` | Hydrogen (`/teamwork-preview`) |
 | `foreplay-porthost` | `GPL-3.0-only` | Bidirectional Godot 4 `.tscn` importer/exporter, 200-scene conformance gate, endian-aware `BinaryReader`, `ByoRomWizard`, `WorldCellStreamer`, 1,000-frame Differential Oracle | `rustports` + `skate2-rust-port` | `[mechanical]` | Hydrogen (`/teamwork-preview`) |
-| `foreplay-export` | `GPL-3.0-only` | `FpckArchive` binary packer/unpacker (FNV-1a TOC + traversal guard) + `ProjectExporter` for Linux/SteamDeck, Windows, macOS Game Mode `.app`, WebGPU, SexOS `.sexpkg` | Godot `EditorExportPlatform` | `[mechanical]` | Hydrogen (`/teamwork-preview`) |
-| `foreplay-harness` | `GPL-3.0-only` | `HarnessSession` Undo/Redo bus, JSON-RPC 2.0 MCP stdio server (`mcp-stdio`), `.tscn` converter, and `verify-all-gates` automated gate runner | 3JSE `HARNESS.md` + `bevy_remote` | `[semantic]` | Hydrogen + Carbon |
-| `foreplay-editor` | `GPL-3.0-only` | Full Godot 4.4 `egui` + `egui_dock` IDE: 6 Workspaces, Multi-Scene tabs, 5 Modals, 7 Bottom Docks, 3D/2D Gizmos, live WGSL/FPCK/`GdVm`/Oracle integration | Godot `editor/` + 3JSE Editor | `[mechanical]` | Hydrogen |
-| `foreplay-verifier` | `GPL-3.0-only` | Independent Carbon red-team crate: 20 `proptest` & hostile fuzz suites (10k Undo/Redo marathon, Bevy hierarchy isomorphism, `.fscn`/`.tscn`/`.gd`/`.gdshader`/`.fpck` fuzzers) | RustPorts Verification Ratchet | `[semantic]` | Carbon (Verifier) |
+| `foreplay-export` | `GPL-3.0-only` | `FpckArchive` binary packager + `ProjectExporter` for 6 targets: Linux/SteamDeck, Windows, macOS Game Mode `.app`, WebGPU, SexOS `.sexpkg`, and 3JSE Three.js Project | Godot `EditorExportPlatform` + 3JSE | `[mechanical]` | Hydrogen (`/teamwork-preview`) |
+| `foreplay-harness` | `GPL-3.0-only` | `HarnessSession` Undo/Redo bus, JSON-RPC 2.0 MCP stdio server (`mcp-stdio`), `.tscn` & Three.js converters, and `verify-all-gates` automated gate runner | 3JSE `HARNESS.md` + `bevy_remote` | `[semantic]` | Hydrogen + Carbon |
+| `foreplay-editor` | `GPL-3.0-only` | Logic Pro / Final Cut Pro `StudioObsidianPro` IDE: 8 Workspaces (`2D`, `3D`, `Model`, `Script`, `Three.js`, `Atlas`, `Port Diff`, `AssetLib`), LCD HUD, Rotary Knobs, FCP Magnetic Timeline | Godot `editor/` + Logic Pro + Final Cut Pro | `[mechanical]` | Hydrogen |
+| `foreplay-verifier` | `GPL-3.0-only` | Independent Carbon red-team crate: 30 `proptest` & hostile fuzz suites covering IR, ECS, Polyamour topology, `.blend`/`polyops`, Three.js, UE6 rollback, meshlets & audio | RustPorts Verification Ratchet | `[semantic]` | Carbon (Verifier) |
 
 ---
 
@@ -105,3 +107,36 @@ Following **3JSE Principle #1** (*"Bevy is a dependency, never a fork"*), Forepl
 - [x] **Phase 6 — Dual Scripting (`QuickJsComponentRunner` + `GdVm`) & One-Click Export (COMPLETE)**
   - *Deliverables:* Zero-compile TS/JS `QuickJsComponentRunner`, step-budgeted GDScript `GdVm`, `FpckArchive` binary packager, and `ProjectExporter` across 5 targets (`Linux/SteamDeck`, `Windows`, `macOS .app` with `LSSupportsGameMode`, `WebGPU`, `SexOS .sexpkg`).
   - *Verified Exit Gate:* All 5 release bundles packed, FNV-1a checksummed, unpacked, and verified against adversarial bit-flip and path-traversal attacks.
+
+
+---
+
+## 5. Foreplay v2.0 — World-Class Studio Expansion (Phases 7–11 COMPLETE)
+
+- [x] **Phase 7 — Built-In Polyamour 3D Modeling, Modifier Stack, `.blend` I/O & AgX Path Tracer (`foreplay-polyamour`) (COMPLETE)**
+  - *Subtasks:*
+    - `7.1` N-gon `PolyMesh` + topological `HalfEdgeMesh` (loops, manifold check, weld, ear-clip triangulation) + 10 Blender & skate primitives `[semantic]` (Carbon High)
+    - `7.2` Destructive Edit-Mode operations (`extrude`, `inset`, `bevel`, `loop_cut`, `knife_bisect`, `boolean_csg`, `recalc_normals`, `fill_boundary_holes`) `[semantic]` (Carbon High)
+    - `7.3` Non-destructive 9-modifier stack (`Mirror`, `Catmull-Clark Subdivision`, `Array`, `Solidify`, `Bevel`, `Triangulate`, `Weld`, `Displace`, `Smooth`) `[semantic]` (Carbon High)
+    - `7.4` Native `.blend` (2.79 / 3.x / 4.x / 5.0), glTF 2.0/GLB, OBJ+MTL, STL, PLY I/O + `polyops 1` (`import bpy`) atomic scripting + SAH BVH GGX/AgX path tracer `[semantic]` (Carbon High)
+  - *Verified Exit Gate:* `polyops 1` atomic scripts, Catmull-Clark & boolean stacks, `.blend`/OBJ/STL/PLY/GLTF round-trips, and deterministic AgX path-traced previews PASS.
+- [x] **Phase 8 — Dual Engine Compilation: 3JSE / Three.js WebGPU + TypeScript Games (`foreplay-threejs`) (COMPLETE)**
+  - *Subtasks:*
+    - `8.1` `compile_ir_to_threejs_project`: Compile `IrScene` + Polyamour `BufferGeometry` meshes + PBR materials + lights + UI HUD + `FeelSpec` DevHUD + `@3jse/atlas` + GDScript/TS behaviors into a runnable Vite + TypeScript + `three` (`WebGPURenderer` + `WebGLRenderer`) project `[mechanical]` (Hydrogen)
+    - `8.2` `import_threejs_json_to_ir` & `export_ir_to_threejs_json`: Bidirectional `THREE.Object3D.toJSON()` & `3jse.scene.json` round-trip `[mechanical]` (Hydrogen)
+    - `8.3` Wired `ExportTarget::ThreeJsWebProject` into `foreplay-export` and `"foreplay/export_threejs"` / `"foreplay/import_threejs"` into `foreplay-harness` `[mechanical]` (Hydrogen)
+  - *Verified Exit Gate:* Full 3D skate/platformer scene compiled to Vite + Three.js TS project AND `neon_skate_3jse.json` round-tripped back into `foreplay-ir`.
+- [x] **Phase 9 — UE6 Next-Gen Engine Subsystems (`foreplay-core`, `foreplay-atlas`, `foreplay-render`, `foreplay-physics`, `foreplay-audio`) (COMPLETE)**
+  - *Subtasks:*
+    - `9.1` UE6/Verse `SpeculativeFrameBuffer` transactional rollback + 3D Spline PCG (`PcgSplineExtruder`, `PcgScatterGrid`) + Two-Bone/FABRIK IK & Motion Matching (`PoseSearchDatabase`) + Atlas 600-frame `TimeTravelAtlasRecorder` & `SubtreeLeaseManager` `[semantic]` (Carbon High)
+    - `9.2` Shaded PBR + Radiance Cascades/Voxel GI + AgX viewport renderer + 64-vert Meshlet LOD clusterer + SSIM/PSNR perceptual diff gate `[semantic]` (Carbon High)
+    - `9.3` SAH BVH `TriMeshCollider3D` + convex GJK + `RagdollRig3D` + `moan-core`-style 48kHz non-destructive `AudioTimeline` + `SkateFoleySynth` + `SpectrumAnalyzer32` `[semantic]` (Carbon High)
+  - *Verified Exit Gate:* Speculative rollback bit-exactness, SSIM 1.0 deterministic PBR+GI render gate, bowl trimesh collision, and 0-alloc 48kHz audio clip/synth rendering PASS.
+- [x] **Phase 10 — Apple Logic Pro & Final Cut Pro "Studio Obsidian & Chroma" UX (`foreplay-editor`) (COMPLETE)**
+  - *Subtasks:*
+    - `10.1` `StudioObsidianPro` theme (`#0d0f14` + frosted cards + jewel-tone track palette) + smoked-glass `studio_lcd_hud` + 270° `rotary_arc_knob` Smart Controls + `eq_response_and_spectrum_canvas` `[mechanical]` (Hydrogen)
+    - `10.2` Final Cut Pro Magnetic Director Timeline (live optical hover-skimming, connected audio/camera/signal clips, Bezier F-curves) + macOS 120Hz trackpad pinch-zoom/pan gestures `[mechanical]` (Hydrogen)
+    - `10.3` Live `Model` (Polyamour `Tab` Edit Mode + modifiers + `polyops` + AgX path-trace preview) and `Three.js` (8-tab live TS/Vite/Atlas codegen & import) workspaces `[mechanical]` (Hydrogen)
+  - *Verified Exit Gate:* Headless `egui` verification across all **8 IDE workspaces**, **7 bottom docks**, and **5 modals** + 36/36 live PBR/Polyamour/Three.js integration tests PASS.
+- [x] **Phase 11 — v2.0 Adversarial Red-Team Verification (`foreplay-verifier`) (COMPLETE)**
+  - *Verified Exit Gate:* **30 / 30** independent adversarial `proptest` & corruption suites (`39/39` test runners) PASS 100% green with zero panics.

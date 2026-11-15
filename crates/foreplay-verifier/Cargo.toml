@@ -20,7 +20,10 @@ foreplay-audio = { path = "../foreplay-audio" }
 foreplay-platform = { path = "../foreplay-platform" }
 foreplay-export = { path = "../foreplay-export" }
 foreplay-script = { path = "../foreplay-script" }
+foreplay-polyamour = { path = "../foreplay-polyamour" }
+foreplay-threejs = { path = "../foreplay-threejs" }
 bevy_ecs = { workspace = true }
+bevy_math = { workspace = true }
 proptest = { workspace = true }
 serde_json = { workspace = true }
 

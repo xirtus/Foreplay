@@ -19,6 +19,7 @@ pub enum ExportTarget {
     MacOsAppBundle,
     WebGpuBrowserUrl,
     SexOsPackage,
+    ThreeJsWebProject,
 }
 
 impl ExportTarget {
@@ -29,6 +30,7 @@ impl ExportTarget {
             Self::MacOsAppBundle,
             Self::WebGpuBrowserUrl,
             Self::SexOsPackage,
+            Self::ThreeJsWebProject,
         ]
     }
 
@@ -39,6 +41,7 @@ impl ExportTarget {
             Self::MacOsAppBundle => "macOS App Bundle (.app)",
             Self::WebGpuBrowserUrl => "WebGPU HTML5 / WebApp",
             Self::SexOsPackage => "SexOS Native Package (.sexpkg)",
+            Self::ThreeJsWebProject => "3JSE / Three.js TypeScript Project",
         }
     }
 }
@@ -286,6 +289,78 @@ impl ProjectExporter {
                 bundle_files.insert("sexpkg.toml".into(), manifest.into_bytes());
                 bundle_files.insert("game.fpck".into(), archive_bytes.clone());
             }
+
+            ExportTarget::ThreeJsWebProject => {
+                primary_artifact = "package.json".into();
+                bundle_files.insert("game.fpck".into(), archive_bytes.clone());
+
+                // Attempt to load scene from main_scene in config.files
+                let clean_path = config.main_scene.trim_start_matches("res://");
+                let scene = if let Some(data) = config.files.get(clean_path).or_else(|| config.files.get(&config.main_scene)) {
+                    if let Ok(s) = String::from_utf8(data.clone()) {
+                        foreplay_ir::IrScene::from_fscn_str(&s).unwrap_or_else(|_| foreplay_ir::IrScene::new(&config.game_title))
+                    } else {
+                        foreplay_ir::IrScene::new(&config.game_title)
+                    }
+                } else {
+                    let mut found = None;
+                    for (path, data) in &config.files {
+                        if path.ends_with(".fscn")
+                            && let Ok(s) = String::from_utf8(data.clone())
+                            && let Ok(sc) = foreplay_ir::IrScene::from_fscn_str(&s)
+                        {
+                            found = Some(sc);
+                            break;
+                        }
+                    }
+                    found.unwrap_or_else(|| foreplay_ir::IrScene::new(&config.game_title))
+                };
+
+                let mut gd_scripts = std::collections::BTreeMap::new();
+                let mut ts_scripts = std::collections::BTreeMap::new();
+
+                for (&node_id, node) in &scene.nodes {
+                    if let Some(foreplay_ir::IrValue::String(script_path)) = node.properties.get("script").or_else(|| node.properties.get("gdscript")) {
+                        let clean_script = script_path.trim_start_matches("res://");
+                        if let Some(bytes) = config.files.get(clean_script).or_else(|| config.files.get(script_path))
+                            && let Ok(src) = String::from_utf8(bytes.clone())
+                        {
+                            if clean_script.ends_with(".ts") || clean_script.ends_with(".js") {
+                                ts_scripts.insert(node_id, src);
+                            } else {
+                                gd_scripts.insert(node_id, src);
+                            }
+                        }
+                    }
+                }
+
+                if gd_scripts.is_empty() && ts_scripts.is_empty() {
+                    for (path, bytes) in &config.files {
+                        if path.ends_with(".gd")
+                            && let Ok(src) = String::from_utf8(bytes.clone())
+                        {
+                            let target_node = scene.nodes.keys().next().copied().unwrap_or_else(|| foreplay_ir::NodeId::new(1, 1).unwrap());
+                            gd_scripts.insert(target_node, src);
+                            break;
+                        }
+                    }
+                }
+
+                let opts = foreplay_threejs::ThreeJsExportOptions {
+                    project_name: config.game_title.clone(),
+                    use_webgpu_renderer: true,
+                    include_feel_dev_hud: true,
+                    include_atlas_json: true,
+                    tone_mapping: foreplay_threejs::ThreeToneMapping::AgX,
+                };
+
+                let bundle = foreplay_threejs::compile_ir_to_threejs_project(&scene, &gd_scripts, &ts_scripts, &opts)
+                    .map_err(|e| ExportError::InvalidConfig(format!("Three.js compilation failed: {e}")))?;
+
+                for (filename, content) in bundle.files {
+                    bundle_files.insert(filename, content.into_bytes());
+                }
+            }
         }
 
         Ok(ExportOutput {
@@ -317,7 +392,7 @@ mod tests {
     }
 
     #[test]
-    fn export_all_five_targets() {
+    fn export_all_six_targets() {
         let cfg = test_config();
 
         for &target in ExportTarget::all() {
@@ -366,6 +441,19 @@ mod tests {
                     let manifest = String::from_utf8(out.bundle_files["sexpkg.toml"].clone()).unwrap();
                     assert!(manifest.contains("runtime = \"foreplay-v1\""));
                     assert!(manifest.contains("capabilities = [\"webgpu\", \"feel-haptics\", \"audio\"]"));
+                }
+                ExportTarget::ThreeJsWebProject => {
+                    assert_eq!(out.primary_artifact, "package.json");
+                    assert!(out.bundle_files.contains_key("package.json"));
+                    assert!(out.bundle_files.contains_key("src/main.ts"));
+                    assert!(out.bundle_files.contains_key("src/scene.ts"));
+                    assert!(out.bundle_files.contains_key("src/feel.ts"));
+                    assert!(out.bundle_files.contains_key("src/scripts/behaviors.ts"));
+                    assert!(out.bundle_files.contains_key("src/atlas.json"));
+                    assert!(out.bundle_files.contains_key("vite.config.ts"));
+                    assert!(out.bundle_files.contains_key("tsconfig.json"));
+                    assert!(out.bundle_files.contains_key("index.html"));
+                    assert!(out.bundle_files.contains_key("game.fpck"));
                 }
             }
         }

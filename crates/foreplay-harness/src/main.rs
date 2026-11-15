@@ -221,8 +221,8 @@ fn main() {
             }
             println!("PASS (1,000/1,000 frames matched upstream oracle within 1e-4 tolerance)");
 
-            // Gate 4: Phase 6 One-Click Export Bundle Gate
-            print!("[4/4] Running Phase 6 One-Click Export Bundle Gate (5 targets)... ");
+            // Gate 4: Phase 6 One-Click Export Bundle Gate (all 6 targets)
+            print!("[4/4] Running Phase 6 One-Click Export Bundle Gate (6 targets + 3JSE Three.js & bidirectional JSON)... ");
             io::stdout().flush().unwrap();
             let mut export_cfg = foreplay_export::ExportConfig::new(
                 "ForeplaySkater",
@@ -251,8 +251,33 @@ fn main() {
                         std::process::exit(1);
                     });
                 assert!(unpacked.contains_key("scenes/park.fscn"));
+
+                if target == foreplay_export::ExportTarget::ThreeJsWebProject {
+                    assert_eq!(out.primary_artifact, "package.json");
+                    assert!(out.bundle_files.contains_key("package.json"));
+                    assert!(out.bundle_files.contains_key("src/main.ts"));
+                    assert!(out.bundle_files.contains_key("src/scene.ts"));
+                    assert!(out.bundle_files.contains_key("src/feel.ts"));
+                    assert!(out.bundle_files.contains_key("src/scripts/behaviors.ts"));
+                    assert!(out.bundle_files.contains_key("src/atlas.json"));
+                    assert!(out.bundle_files.contains_key("vite.config.ts"));
+                    assert!(out.bundle_files.contains_key("tsconfig.json"));
+                    assert!(out.bundle_files.contains_key("index.html"));
+                }
             }
-            println!("PASS (Linux/SteamDeck, Windows, macOS .app with Game Mode, WebGPU, SexOS bundles verified)");
+
+            // Bidirectional Three.js JSON round-trip verification
+            let threejs_json = foreplay_threejs::export_ir_to_threejs_json(&session.tree.active_scene);
+            let reimported_scene = foreplay_threejs::import_threejs_json_to_ir(&threejs_json)
+                .unwrap_or_else(|e| {
+                    eprintln!("\nBidirectional Three.js JSON import failed: {e}");
+                    std::process::exit(1);
+                });
+            assert_eq!(reimported_scene.nodes.len(), session.tree.active_scene.nodes.len());
+            assert_eq!(reimported_scene.feel_overrides.len(), session.tree.active_scene.feel_overrides.len());
+            assert_eq!(reimported_scene.connections.len(), session.tree.active_scene.connections.len());
+
+            println!("PASS (Linux/SteamDeck, Windows, macOS .app with Game Mode, WebGPU, SexOS, 3JSE Three.js bundles & bidirectional JSON round-trip verified)");
 
             println!("============================================================");
             println!("ALL 4 VERIFICATION GATES PASSED (100% GREEN)");

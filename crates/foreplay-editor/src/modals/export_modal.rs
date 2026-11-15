@@ -17,6 +17,7 @@ pub enum ExportPlatformPreset {
     MacOsApp,
     WebGpuBrowser,
     SexOsPackage,
+    ThreeJsWebProject,
 }
 
 impl ExportPlatformPreset {
@@ -27,6 +28,7 @@ impl ExportPlatformPreset {
             Self::MacOsApp => ExportTarget::MacOsAppBundle,
             Self::WebGpuBrowser => ExportTarget::WebGpuBrowserUrl,
             Self::SexOsPackage => ExportTarget::SexOsPackage,
+            Self::ThreeJsWebProject => ExportTarget::ThreeJsWebProject,
         }
     }
 }
@@ -78,6 +80,7 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
         (ExportPlatformPreset::MacOsApp, "🍎 macOS .app (Game Mode / ARM64)"),
         (ExportPlatformPreset::WebGpuBrowser, "🌐 WebGPU Browser URL (Wasm)"),
         (ExportPlatformPreset::SexOsPackage, "⚡ SexOS sexlife Package (.sexpkg)"),
+        (ExportPlatformPreset::ThreeJsWebProject, "🚀 3JSE / Three.js Project (Vite + TS)"),
     ];
 
     ui.horizontal(|ui| {
@@ -95,6 +98,7 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
                             ExportPlatformPreset::MacOsApp => "build/macos/ForeplayParkDemo.app".into(),
                             ExportPlatformPreset::WebGpuBrowser => "build/web/index.html".into(),
                             ExportPlatformPreset::SexOsPackage => "build/sexos/ForeplayParkDemo.sexpkg".into(),
+                            ExportPlatformPreset::ThreeJsWebProject => "build/threejs/index.html".into(),
                         };
                     }
                 }

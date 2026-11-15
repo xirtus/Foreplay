@@ -8,6 +8,7 @@ description = "AudioServer bus mixer and pluggable audio decoder trait (Vorbis, 
 
 [dependencies]
 foreplay-ir = { path = "../foreplay-ir" }
+bevy_math = { workspace = true }
 
 [lints]
 workspace = true

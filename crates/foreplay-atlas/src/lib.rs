@@ -1,8 +1,13 @@
 //! Foreplay Atlas (`foreplay-atlas`) — Semantic layer modeled on `@3jse/atlas`.
 //! Compiles `IrScene` + declared contracts into human- and agent-legible meaning graphs.
 
+pub mod timetravel;
 pub mod visual_graph;
 
+pub use timetravel::{
+    FeelSpecLiveChange, HistoricalFrameRecord, LeaseError, SignalPulse, SubtreeLease,
+    SubtreeLeaseManager, TimeTravelAtlasRecorder, TimeTravelScrubView,
+};
 pub use visual_graph::{
     MathOperator, VisualGraph, VisualGraphConnection, VisualGraphExecutionReport, VisualGraphNode,
     VisualGraphNodeKind, VisualGraphTrigger,
@@ -668,6 +673,200 @@ mod tests {
         let edge_signal = edges.iter().find(|e| e.from == skater_id && e.to == camera_id);
         assert!(edge_signal.is_some());
         assert!(edge_signal.unwrap().relation.contains("trick_landed"));
+    }
+
+    #[test]
+    fn time_travel_recorder_scrubbing_and_causal_chain_tracing() {
+        use foreplay_ir::IrValue;
+
+        let n1 = NodeId::new(1, 1).unwrap();
+        let n2 = NodeId::new(2, 1).unwrap();
+        let n3 = NodeId::new(3, 1).unwrap();
+
+        let mut recorder = TimeTravelAtlasRecorder::new(600);
+
+        // Frame 10: pulse 1 (n1 -> n2)
+        recorder.record_frame(
+            10,
+            0x1010,
+            vec![SignalPulse {
+                pulse_id: 1,
+                tick: 10,
+                from_node: n1,
+                signal_name: "trick_initiated".into(),
+                to_node: n2,
+                method_name: "handle_trick".into(),
+                payload: IrValue::String("kickflip".into()),
+                caused_by: None,
+            }],
+            vec![],
+        );
+
+        // Frame 11: pulse 2 caused by pulse 1 (n2 -> n3)
+        recorder.record_frame(
+            11,
+            0x1111,
+            vec![SignalPulse {
+                pulse_id: 2,
+                tick: 11,
+                from_node: n2,
+                signal_name: "score_awarded".into(),
+                to_node: n3,
+                method_name: "add_score".into(),
+                payload: IrValue::I64(500),
+                caused_by: Some(1),
+            }],
+            vec![FeelSpecLiveChange {
+                tick: 11,
+                key: "camera_shake".into(),
+                old_value: Some(0.0),
+                new_value: 0.8,
+            }],
+        );
+
+        // Scrub tick 11
+        let view = recorder.scrub_to_tick(11).expect("scrub tick 11");
+        assert_eq!(view.state_hash, 0x1111);
+        assert_eq!(view.active_pulses.len(), 1);
+        assert_eq!(view.active_pulses[0].method_name, "add_score");
+        assert_eq!(view.active_feel_changes.len(), 1);
+        assert_eq!(view.active_feel_changes[0].key, "camera_shake");
+
+        // Active wires at tick 10
+        let wires = recorder.active_wires_at_tick(10);
+        assert_eq!(wires, vec![(n1, n2, "trick_initiated".to_string())]);
+
+        // Causal trace backwards from pulse 2
+        let trace = recorder.causal_trace(2);
+        assert_eq!(trace.len(), 2);
+        assert_eq!(trace[0].pulse_id, 1);
+        assert_eq!(trace[1].pulse_id, 2);
+
+        // Causal chain for node n3
+        let n3_chain = recorder.causal_chain_for_node(n3, 0, 20);
+        assert_eq!(n3_chain.len(), 1);
+        assert_eq!(n3_chain[0].pulse_id, 2);
+    }
+
+    #[test]
+    fn multi_agent_subtree_lease_isolation_and_conflict_prevention() {
+        use foreplay_ir::{EditorCommand, IrNode};
+
+        let mut scene = IrScene::new("MultiAgentPark");
+        let root_id = NodeId::new(0, 1).unwrap();
+        let skater_root = NodeId::new(1, 1).unwrap();
+        let skater_board = NodeId::new(2, 1).unwrap();
+        let prop_root = NodeId::new(3, 1).unwrap();
+        let prop_lamp = NodeId::new(4, 1).unwrap();
+
+        scene.nodes.insert(
+            root_id,
+            IrNode {
+                id: root_id,
+                name: "ParkRoot".into(),
+                class_name: "Node3D".into(),
+                parent: None,
+                instance_scene: None,
+                properties: BTreeMap::new(),
+                groups: vec![],
+            },
+        );
+        scene.nodes.insert(
+            skater_root,
+            IrNode {
+                id: skater_root,
+                name: "Skater".into(),
+                class_name: "CharacterBody3D".into(),
+                parent: Some(root_id),
+                instance_scene: None,
+                properties: BTreeMap::new(),
+                groups: vec![],
+            },
+        );
+        scene.nodes.insert(
+            skater_board,
+            IrNode {
+                id: skater_board,
+                name: "Deck".into(),
+                class_name: "Node3D".into(),
+                parent: Some(skater_root),
+                instance_scene: None,
+                properties: BTreeMap::new(),
+                groups: vec![],
+            },
+        );
+        scene.nodes.insert(
+            prop_root,
+            IrNode {
+                id: prop_root,
+                name: "StreetFurniture".into(),
+                class_name: "Node3D".into(),
+                parent: Some(root_id),
+                instance_scene: None,
+                properties: BTreeMap::new(),
+                groups: vec![],
+            },
+        );
+        scene.nodes.insert(
+            prop_lamp,
+            IrNode {
+                id: prop_lamp,
+                name: "LampPost".into(),
+                class_name: "Node3D".into(),
+                parent: Some(prop_root),
+                instance_scene: None,
+                properties: BTreeMap::new(),
+                groups: vec![],
+            },
+        );
+
+        let mut mgr = SubtreeLeaseManager::new();
+
+        // Agent A acquires lease on Skater subtree
+        let lease_a = mgr
+            .acquire_lease("agent_physics", skater_root, &scene)
+            .expect("agent_physics lease");
+
+        // Agent B acquires lease on StreetFurniture subtree (disjoint! should succeed)
+        let lease_b = mgr
+            .acquire_lease("agent_environment", prop_root, &scene)
+            .expect("agent_environment lease");
+
+        assert_ne!(lease_a, lease_b);
+
+        // Agent C tries to acquire lease on ParkRoot (ancestor of both!) -> must fail with conflict
+        let conflict_root = mgr.acquire_lease("agent_director", root_id, &scene);
+        assert!(matches!(conflict_root, Err(LeaseError::SubtreeConflict { .. })));
+
+        // Agent B tries to acquire lease on Deck (inside Agent A's lease!) -> must fail
+        let conflict_deck = mgr.acquire_lease("agent_environment", skater_board, &scene);
+        assert!(matches!(conflict_deck, Err(LeaseError::SubtreeConflict { .. })));
+
+        // Check command allowance: Agent A mutating skater_board
+        let cmd_ok = EditorCommand::SetProperty {
+            node_id: skater_board,
+            key: "grip_tape_color".into(),
+            old_value: None,
+            new_value: Some(foreplay_ir::IrValue::String("black".into())),
+        };
+        assert!(mgr.check_command_allowed("agent_physics", &cmd_ok, &scene).is_ok());
+
+        // Agent A trying to mutate lamp post -> unauthorized!
+        let cmd_bad = EditorCommand::SetProperty {
+            node_id: prop_lamp,
+            key: "light_energy".into(),
+            old_value: None,
+            new_value: Some(foreplay_ir::IrValue::F64(10.0)),
+        };
+        assert!(matches!(
+            mgr.check_command_allowed("agent_physics", &cmd_bad, &scene),
+            Err(LeaseError::UnauthorizedMutation { .. })
+        ));
+
+        // Release lease
+        mgr.release_lease("agent_physics", lease_a).expect("release lease");
+        // Now agent_director can acquire skater_root
+        assert!(mgr.acquire_lease("agent_director", skater_root, &scene).is_ok());
     }
 }
 

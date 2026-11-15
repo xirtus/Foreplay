@@ -20,6 +20,8 @@ foreplay-atlas = { path = "../foreplay-atlas" }
 foreplay-harness = { path = "../foreplay-harness" }
 foreplay-porthost = { path = "../foreplay-porthost" }
 foreplay-export = { path = "../foreplay-export" }
+foreplay-polyamour = { path = "../foreplay-polyamour" }
+foreplay-threejs = { path = "../foreplay-threejs" }
 egui = { workspace = true }
 eframe = { workspace = true }
 egui_dock = { workspace = true }

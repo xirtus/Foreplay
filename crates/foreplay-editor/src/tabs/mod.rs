@@ -18,12 +18,14 @@ pub mod shader_editor;
 pub mod tilemap;
 pub mod debugger;
 pub mod ai_harness;
+pub mod polyamour_model;
+pub mod threejs_studio;
 
 use egui::{Id, WidgetText};
 use egui_dock::{DockState, NodeIndex, TabViewer};
 use crate::ForeplayEditorApp;
 
-/// Dock tabs matching Godot 4 + 3JSE Atlas + RustPorts Differential Inspector.
+/// Dock tabs matching Godot 4 + 3JSE Atlas + RustPorts Differential Inspector + Polyamour + Three.js Studio.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum EditorTab {
     SceneHierarchy,
@@ -45,6 +47,8 @@ pub enum EditorTab {
     ShaderEditor,
     TileMap,
     AiHarness,
+    PolyamourModel,
+    ThreeJsStudio,
 }
 
 impl EditorTab {
@@ -69,14 +73,16 @@ impl EditorTab {
             Self::ShaderEditor => "Shader Editor",
             Self::TileMap => "TileMap",
             Self::AiHarness => "AI Harness",
+            Self::PolyamourModel => "Model (Polyamour 3D)",
+            Self::ThreeJsStudio => "Three.js Studio (3JSE)",
         }
     }
 }
 
-/// Builds the default Godot 4-style dock layout:
+/// Builds the default Godot 4 / Apple Pro-style dock layout:
 /// - Left-Top: SceneHierarchy
 /// - Left-Bottom: FileSystem (split below SceneHierarchy)
-/// - Center: Viewport3D, Viewport2D, ScriptView, AtlasGraph, PortDiff, AssetLib
+/// - Center: Viewport3D, Viewport2D, PolyamourModel, ScriptView, ThreeJsStudio, AtlasGraph, PortDiff, AssetLib
 /// - Right: Inspector, NodeSignalsGroups, History, FeelSpec
 /// - Bottom: Console, Debugger, AudioMixer, Animation, ShaderEditor, TileMap, AiHarness
 pub fn build_default_dock_state() -> DockState<EditorTab> {
@@ -84,7 +90,9 @@ pub fn build_default_dock_state() -> DockState<EditorTab> {
     let center_tabs = vec![
         EditorTab::Viewport3D,
         EditorTab::Viewport2D,
+        EditorTab::PolyamourModel,
         EditorTab::ScriptView,
+        EditorTab::ThreeJsStudio,
         EditorTab::AtlasGraph,
         EditorTab::PortDiff,
         EditorTab::AssetLib,
@@ -96,7 +104,7 @@ pub fn build_default_dock_state() -> DockState<EditorTab> {
         .main_surface_mut()
         .split_left(NodeIndex::root(), 0.20, vec![EditorTab::SceneHierarchy]);
 
-    // Split Left-Bottom: FileSystem under SceneHierarchy (50% height of left dock)
+    // Split Left-Bottom: FileSystem under SceneHierarchy (55% height of left dock)
     let [_hierarchy_node, _fs_node] = state
         .main_surface_mut()
         .split_below(left_node, 0.55, vec![EditorTab::FileSystem]);
@@ -175,6 +183,8 @@ impl TabViewer for EditorTabViewer<'_> {
             EditorTab::ShaderEditor => shader_editor::show(self.app, ui),
             EditorTab::TileMap => tilemap::show(self.app, ui),
             EditorTab::AiHarness => ai_harness::show(self.app, ui),
+            EditorTab::PolyamourModel => polyamour_model::show(self.app, ui),
+            EditorTab::ThreeJsStudio => threejs_studio::show(self.app, ui),
         }
     }
 }

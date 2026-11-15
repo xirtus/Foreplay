@@ -1,0 +1,21 @@
+[package]
+name = "foreplay-threejs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-3.0-only"
+description = "3JSE-compatible Three.js (WebGPURenderer + Vite + TypeScript + @3jse/atlas + FeelSpec) game compiler and bidirectional scene importer"
+
+[dependencies]
+foreplay-ir = { path = "../foreplay-ir" }
+foreplay-atlas = { path = "../foreplay-atlas" }
+foreplay-gdscript = { path = "../foreplay-gdscript" }
+foreplay-script = { path = "../foreplay-script" }
+foreplay-polyamour = { path = "../foreplay-polyamour" }
+bevy_math = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

@@ -13,13 +13,15 @@ members = [
     "crates/foreplay-atlas",
     "crates/foreplay-harness",
     "crates/foreplay-porthost",
+    "crates/foreplay-polyamour",
+    "crates/foreplay-threejs",
     "crates/foreplay-export",
     "crates/foreplay-editor",
     "crates/foreplay-verifier",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.95"
 repository = "https://github.com/xirtus/foreplay"

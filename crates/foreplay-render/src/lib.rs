@@ -1,8 +1,17 @@
 pub mod benchmark;
+pub mod meshlet;
+pub mod pbr_gi;
+pub mod perceptual;
 pub mod pipeline;
 pub mod shader;
 
 pub use benchmark::{run_10k_entity_render_benchmark, DrawCommand, RenderBenchmarkReceipt};
+pub use meshlet::{build_meshlets, cull_meshlets, Meshlet, MAX_MESHLET_TRIANGLES, MAX_MESHLET_VERTICES};
+pub use pbr_gi::{
+    agx_tonemap_srgb, render_shaded_pbr_viewport_rgba8, PbrMaterialDesc, PbrViewportParams,
+    RadianceCascade2D, RenderTriangleMesh, VoxelGiGrid,
+};
+pub use perceptual::{compute_psnr_rgba8, compute_ssim_rgba8};
 pub use pipeline::{cull_aabbs_frustum, EmissionShape, Frustum, GpuParticles3DSim, Particle3D, Plane, ViewportDebugDraw};
 pub use shader::{compile_gdshader_to_wgsl, ShaderCompileError, ShaderType, ShaderUniform, UniformHint, UniformType, VisualShaderGraph, VisualShaderNode};
 

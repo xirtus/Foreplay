@@ -4,6 +4,7 @@
 //! Area3D triggers, and 3D constraints.
 
 pub mod server_2d;
+pub mod trimesh_convex;
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, RwLock};
@@ -11,6 +12,10 @@ use bevy_math::Vec3;
 use foreplay_ir::{NodeId, PhysicsBackend};
 
 pub use server_2d::{CharacterBody2D, Collider2D, PhysicsBody2D, PhysicsServer2D, RayHit2D, StaticRect2D};
+pub use trimesh_convex::{
+    closest_point_on_triangle, gjk_intersects, ContactManifold3D, ConvexHullCollider3D,
+    RagdollBone, RagdollBoneId, RagdollRig3D, TriMeshCollider3D,
+};
 
 /// 3D collision shape for broad-phase and narrow-phase queries.
 #[derive(Clone, Copy, PartialEq, Debug)]

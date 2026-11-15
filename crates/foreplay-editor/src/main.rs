@@ -2,7 +2,7 @@
 //!
 //! Dual-mode entrypoint:
 //! - Default / `--headless`: Executes full headless smoke verification across:
-//!   - All 6 top workspaces (`Workspace2D`, `Workspace3D`, `Script`, `AtlasGraph`, `PortDiff`, `AssetLib`)
+//!   - All 8 top workspaces (`Workspace3D`, `Workspace2D`, `ModelPolyamour`, `Script`, `ThreeJsWeb`, `AtlasGraph`, `PortDiff`, `AssetLib`)
 //!   - All 7 bottom panel tabs (`Output`, `Debugger`, `AudioMixer`, `Animation`, `ShaderEditor`, `TileMap`, `AiHarness`)
 //!   - All 5 active modals (`ProjectManager`, `ProjectSettings`, `ExportProject`, `CommandPalette`, `CreateNodeDialog`)
 //!     verifies non-empty paint shapes, prints status report, and exits 0 cleanly.
@@ -21,30 +21,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.populate_starter_scene();
 
     if launch_gui {
-        println!("Launching Foreplay Game Engine Editor Desktop GUI...");
+        println!("Launching Foreplay Game Engine Editor Desktop GUI (Studio Obsidian Pro)...");
         let native_options = eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
                 .with_inner_size([1440.0, 900.0])
                 .with_min_inner_size([960.0, 600.0])
-                .with_title("Foreplay Game Engine — v0.1.0 (Godot 4 Dockable IDE)"),
+                .with_title("Foreplay Game Engine — v2.0 (Studio Obsidian & Chroma Pro IDE)"),
             ..Default::default()
         };
 
         eframe::run_native(
-            "Foreplay Game Engine — v0.1.0",
+            "Foreplay Game Engine — v2.0",
             native_options,
             Box::new(|_cc| Ok(Box::new(app))),
         )?;
     } else {
-        println!("Foreplay Game Engine Editor v0.1.0 (Headless Smoke Verification)");
+        println!("Foreplay Game Engine Editor v2.0 (Headless Smoke Verification)");
         println!("Project: '{}' | Nodes: {}", app.session.tree.active_scene.name, app.session.tree.active_scene.nodes.len());
+        println!("Active Theme: {:?}", app.theme_preset);
 
-        // 1. Verify all 6 workspaces
-        println!("\n[1/3] Verifying IDE Workspaces:");
+        // 1. Verify all 8 workspaces
+        println!("\n[1/3] Verifying 8 IDE Workspaces (3D, 2D, Model, Script, Three.js, Atlas, Port Diff, AssetLib):");
         let workspaces = [
             EditorWorkspace::Workspace3D,
             EditorWorkspace::Workspace2D,
+            EditorWorkspace::ModelPolyamour,
             EditorWorkspace::Script,
+            EditorWorkspace::ThreeJsWeb,
             EditorWorkspace::AtlasGraph,
             EditorWorkspace::PortDiff,
             EditorWorkspace::AssetLib,
@@ -110,7 +113,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         app.active_modal = None;
-        println!("\nHeadless smoke verification: 100% PASS across all 6 IDE workspaces, 7 bottom docks, and 5 modals.");
+        println!("\nHeadless smoke verification: 100% PASS across all 8 IDE workspaces, 7 bottom docks, and 5 modals.");
     }
 
     Ok(())

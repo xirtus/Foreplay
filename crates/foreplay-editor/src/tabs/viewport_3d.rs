@@ -26,6 +26,7 @@ use crate::theme::{
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ViewMode3D {
     LitNormal,
+    LitPbrAgx,
     Unshaded,
     Wireframe,
     Overdraw,
@@ -74,6 +75,7 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
         egui::ComboBox::from_id_salt("view_mode_3d_combo")
             .selected_text(match app.view_mode_3d {
                 ViewMode3D::LitNormal => "Lit Normal",
+                ViewMode3D::LitPbrAgx => "✨ Lit PBR AgX Filmic",
                 ViewMode3D::Unshaded => "Unshaded",
                 ViewMode3D::Wireframe => "Wireframe",
                 ViewMode3D::Overdraw => "Overdraw",
@@ -81,6 +83,7 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
             })
             .show_ui(ui, |ui| {
                 ui.selectable_value(&mut app.view_mode_3d, ViewMode3D::LitNormal, "Lit Normal");
+                ui.selectable_value(&mut app.view_mode_3d, ViewMode3D::LitPbrAgx, "✨ Lit PBR AgX Filmic");
                 ui.selectable_value(&mut app.view_mode_3d, ViewMode3D::Unshaded, "Unshaded");
                 ui.selectable_value(&mut app.view_mode_3d, ViewMode3D::Wireframe, "Wireframe");
                 ui.selectable_value(&mut app.view_mode_3d, ViewMode3D::Overdraw, "Overdraw");
@@ -125,7 +128,7 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
     };
     painter.rect_filled(rect, 0.0, bg_color);
 
-    // Handle Camera Controls
+    // Handle Camera Controls (macOS 120Hz Trackpad & Mouse Ergonomics)
     let input = ui.input(|i| i.clone());
     if response.dragged_by(PointerButton::Secondary) || response.dragged_by(PointerButton::Middle) {
         if input.modifiers.shift {
@@ -135,13 +138,33 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
         }
     }
 
-    if response.hovered() && input.smooth_scroll_delta.y != 0.0 {
-        let factor = 1.0 - input.smooth_scroll_delta.y * 0.002;
-        app.camera_3d.zoom(factor);
+    if response.hovered() {
+        // Trackpad pinch-to-zoom gesture
+        let pinch = input.zoom_delta();
+        if (pinch - 1.0).abs() > 0.001 {
+            app.camera_3d.zoom(1.0 / pinch);
+        }
+
+        // Smooth two-finger scroll-pan & wheel zoom
+        if input.smooth_scroll_delta != Vec2::ZERO && !response.dragged() {
+            if input.modifiers.command || input.modifiers.ctrl {
+                let factor = 1.0 - input.smooth_scroll_delta.y * 0.002;
+                app.camera_3d.zoom(factor);
+            } else if input.modifiers.shift {
+                app.camera_3d.pan(input.smooth_scroll_delta * 0.5);
+            } else {
+                app.camera_3d.orbit(input.smooth_scroll_delta * 0.4);
+            }
+        }
+    }
+
+    // 0. Render PBR Shaded AgX rasterizer if active
+    if app.view_mode_3d == ViewMode3D::LitPbrAgx {
+        draw_pbr_agx_viewport(app, &painter, rect);
     }
 
     // 1. Draw 3D Ground Grid (Y = 0)
-    if app.view_mode_3d != ViewMode3D::Overdraw {
+    if app.view_mode_3d != ViewMode3D::Overdraw && app.view_mode_3d != ViewMode3D::LitPbrAgx {
         draw_ground_grid(&painter, &app.camera_3d, rect);
     }
 
@@ -605,4 +628,55 @@ fn get_vec3_prop(node: &foreplay_ir::IrNode, key: &str) -> Option<Vec3> {
         Some(IrValue::Vec3(v)) => Some(Vec3::new(v[0], v[1], v[2])),
         _ => None,
     }
+}
+
+fn draw_pbr_agx_viewport(app: &ForeplayEditorApp, painter: &egui::Painter, rect: Rect) {
+    let forward = app.camera_3d.forward();
+    let rot = bevy_math::Quat::from_rotation_arc(Vec3::NEG_Z, forward);
+    let cam = foreplay_render::PerspectiveCamera3D {
+        position: app.camera_3d.eye(),
+        rotation: rot,
+        fov_y_radians: app.camera_3d.fov_y,
+        aspect_ratio: (rect.width() / rect.height().max(1.0)).clamp(0.1, 10.0),
+        near: 0.1,
+        far: 1000.0,
+    };
+    let mut meshes = Vec::new();
+    let nodes = &app.session.tree.active_scene.nodes;
+    for node in nodes.values() {
+        let pos = get_vec3_prop(node, "position").unwrap_or(Vec3::ZERO);
+        let scale = get_vec3_prop(node, "scale").unwrap_or(Vec3::ONE);
+        let color = if let Some(IrValue::Color(c)) = node.properties.get("color") {
+            [c[0], c[1], c[2]]
+        } else {
+            [0.37, 0.51, 1.0]
+        };
+        let mat = foreplay_render::pbr_gi::PbrMaterialDesc::dielectric(color, 0.35);
+        let model_matrix = bevy_math::Mat4::from_scale_rotation_translation(scale, bevy_math::Quat::IDENTITY, pos);
+        let mesh = foreplay_render::pbr_gi::RenderTriangleMesh::new_cube(1.0, mat, model_matrix);
+        meshes.push(mesh);
+    }
+
+    let pbr_w = 160;
+    let pbr_h = 100;
+    let params = foreplay_render::pbr_gi::PbrViewportParams {
+        width: pbr_w,
+        height: pbr_h,
+        camera: &cam,
+        meshes: &meshes,
+        sun_dir: Vec3::new(-0.5, -1.0, -0.5).normalize_or_zero(),
+        sun_color: [1.0, 0.95, 0.85],
+        sun_intensity: 3.5,
+        sky_color: [0.05, 0.06, 0.08],
+        voxel_gi: None,
+        radiance_cascade: None,
+        selected_mesh_index: None,
+        outline_color: [255, 140, 0, 255],
+        outline_width: 2,
+        enable_shadows: true,
+    };
+    let rgba_buffer = foreplay_render::pbr_gi::render_shaded_pbr_viewport_rgba8(&params);
+    let color_img = egui::ColorImage::from_rgba_unmultiplied([pbr_w as usize, pbr_h as usize], &rgba_buffer);
+    let tex = painter.ctx().load_texture("viewport_pbr_agx", color_img, egui::TextureOptions::LINEAR);
+    painter.image(tex.id(), rect, Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)), Color32::WHITE);
 }

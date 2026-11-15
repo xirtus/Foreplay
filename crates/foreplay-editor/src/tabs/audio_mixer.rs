@@ -1,12 +1,18 @@
-//! Godot 4 Audio Bus Mixer Dock (`foreplay-editor`).
+//! Apple Logic Pro & Godot 4 Audio Bus Mixer Dock (`foreplay-editor`).
 //!
-//! Mirrors Godot 4's Audio Bus Mixer bottom dock:
-//! - Vertical channel strips (`Master`, `Music`, `SFX`, `Voice`)
-//! - VU meter peak bars, volume faders, Mute/Solo buttons, bus sends, and FX racks.
+//! Features:
+//! - Tactile Channel EQ & ChromaGlow frequency response curve overlaid on 32-band spectrum analyzer
+//! - 270° swept rotary knobs for parametric EQ (Low, Mid, High) and Reverb wet mix
+//! - Vertical channel strips (`Master`, `Music`, `SFX`, `Voice`) with peak VU meters, volume faders, Mute/Solo.
 
 use egui::{Color32, RichText, ScrollArea, Slider, Stroke, Ui, Vec2};
 use crate::ForeplayEditorApp;
-use crate::theme::{COLOR_ACCENT_BLUE, COLOR_BORDER, COLOR_ERROR_RED, COLOR_SUCCESS_GREEN, COLOR_TEXT_MUTED, COLOR_TEXT_NORMAL, COLOR_WARN_YELLOW};
+use crate::theme::{
+    CHROMA_AMBER_AUDIO, CHROMA_CYAN_2D, CHROMA_MINT_UI, CHROMA_VIOLET_ANIM,
+    COLOR_BORDER, COLOR_ERROR_RED, COLOR_SUCCESS_GREEN, COLOR_TEXT_MUTED,
+    COLOR_TEXT_NORMAL, COLOR_WARN_YELLOW, STUDIO_OBSIDIAN_ACCENT,
+};
+use crate::widgets::{eq_response_and_spectrum_canvas, rotary_arc_knob};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AudioBusStrip {
@@ -17,15 +23,34 @@ pub struct AudioBusStrip {
     pub send_target: &'static str,
     pub reverb_enabled: bool,
     pub eq_enabled: bool,
+    pub eq_low_db: f32,
+    pub eq_mid_db: f32,
+    pub eq_high_db: f32,
+    pub reverb_wet: f32,
+    pub pan: f32,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct AudioMixerState {
     pub strips: Vec<AudioBusStrip>,
+    pub spectrum_bars: [f32; 32],
+    pub synth: foreplay_audio::procedural_synth::SkateFoleySynth,
+    pub analyzer: foreplay_audio::procedural_synth::SpectrumAnalyzer32,
 }
 
 impl Default for AudioMixerState {
     fn default() -> Self {
+        let mut synth = foreplay_audio::procedural_synth::SkateFoleySynth::new();
+        synth.set_telemetry(12.0, 0.6, true, 8.0);
+        let mut analyzer = foreplay_audio::procedural_synth::SpectrumAnalyzer32::new();
+        let mut buf = vec![[0.0_f32; 2]; 512];
+        synth.generate_block(&mut buf);
+        let dbs = analyzer.process_block(&buf);
+        let mut bars = [0.0f32; 32];
+        for (i, bar) in bars.iter_mut().enumerate() {
+            *bar = ((dbs[i] + 70.0) / 70.0).clamp(0.05, 0.95);
+        }
+
         Self {
             strips: vec![
                 AudioBusStrip {
@@ -36,6 +61,11 @@ impl Default for AudioMixerState {
                     send_target: "Output",
                     reverb_enabled: false,
                     eq_enabled: true,
+                    eq_low_db: 0.0,
+                    eq_mid_db: 0.5,
+                    eq_high_db: -0.5,
+                    reverb_wet: 0.15,
+                    pan: 0.0,
                 },
                 AudioBusStrip {
                     name: "Music",
@@ -44,7 +74,12 @@ impl Default for AudioMixerState {
                     is_solo: false,
                     send_target: "Master",
                     reverb_enabled: false,
-                    eq_enabled: false,
+                    eq_enabled: true,
+                    eq_low_db: -1.0,
+                    eq_mid_db: 1.0,
+                    eq_high_db: 2.0,
+                    reverb_wet: 0.10,
+                    pan: 0.0,
                 },
                 AudioBusStrip {
                     name: "SFX",
@@ -54,6 +89,11 @@ impl Default for AudioMixerState {
                     send_target: "Master",
                     reverb_enabled: true,
                     eq_enabled: true,
+                    eq_low_db: 2.5,
+                    eq_mid_db: -1.5,
+                    eq_high_db: 1.0,
+                    reverb_wet: 0.40,
+                    pan: -0.1,
                 },
                 AudioBusStrip {
                     name: "Voice",
@@ -62,21 +102,66 @@ impl Default for AudioMixerState {
                     is_solo: false,
                     send_target: "Master",
                     reverb_enabled: false,
-                    eq_enabled: false,
+                    eq_enabled: true,
+                    eq_low_db: -2.0,
+                    eq_mid_db: 3.0,
+                    eq_high_db: 1.5,
+                    reverb_wet: 0.20,
+                    pan: 0.0,
                 },
             ],
+            spectrum_bars: bars,
+            synth,
+            analyzer,
         }
     }
 }
 
 pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Audio Bus Mixer").strong().color(COLOR_ACCENT_BLUE));
-        ui.colored_label(COLOR_TEXT_MUTED, "| Multi-track real-time mixing with Bevy AudioServer backend");
+        ui.label(RichText::new("Logic Pro Studio Audio Bus Mixer").strong().color(STUDIO_OBSIDIAN_ACCENT));
+        ui.colored_label(COLOR_TEXT_MUTED, "| ChromaGlow Channel EQ & 32-Band Spectrum Analyzer");
     });
 
     ui.separator();
 
+    // 1. Logic Pro Channel EQ & 32-band Spectrum Canvas Header
+    let speed = if let Some(master) = app.audio_mixer_state.strips.first() {
+        ((master.volume_db + 30.0) / 36.0 * 20.0).max(0.0)
+    } else {
+        10.0
+    };
+    app.audio_mixer_state.synth.set_telemetry(speed, 0.65, true, speed * 0.8);
+    let mut buf = vec![[0.0_f32; 2]; 512];
+    app.audio_mixer_state.synth.generate_block(&mut buf);
+    let dbs = app.audio_mixer_state.analyzer.process_block(&buf);
+    for (i, bar) in app.audio_mixer_state.spectrum_bars.iter_mut().enumerate() {
+        *bar = ((dbs[i] + 70.0) / 70.0).clamp(0.05, 0.95);
+    }
+
+    let (master_low, master_mid, master_high) = if let Some(master) = app.audio_mixer_state.strips.first() {
+        (master.eq_low_db, master.eq_mid_db, master.eq_high_db)
+    } else {
+        (0.0, 0.0, 0.0)
+    };
+
+    ui.group(|ui| {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Master Channel EQ Response").strong().color(CHROMA_AMBER_AUDIO));
+            ui.colored_label(COLOR_TEXT_MUTED, "(Live 20Hz - 20kHz Transfer Function)");
+        });
+        eq_response_and_spectrum_canvas(
+            ui,
+            master_low,
+            master_mid,
+            master_high,
+            &app.audio_mixer_state.spectrum_bars,
+        );
+    });
+
+    ui.separator();
+
+    // 2. Channel Strips
     ScrollArea::horizontal().show(ui, |ui| {
         ui.horizontal(|ui| {
             for strip in &mut app.audio_mixer_state.strips {
@@ -88,21 +173,21 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
 }
 
 fn render_channel_strip(ui: &mut Ui, strip: &mut AudioBusStrip) {
-    ui.allocate_ui(Vec2::new(140.0, 220.0), |ui| {
+    ui.allocate_ui(Vec2::new(170.0, 310.0), |ui| {
         ui.group(|ui| {
             ui.vertical_centered(|ui| {
-                ui.label(RichText::new(strip.name).strong().color(COLOR_ACCENT_BLUE));
+                ui.label(RichText::new(strip.name).strong().color(STUDIO_OBSIDIAN_ACCENT));
             });
             ui.separator();
 
+            // VU Meter & Fader
             ui.horizontal(|ui| {
                 // VU Meter bar
-                let (meter_rect, _resp) = ui.allocate_exact_size(Vec2::new(14.0, 110.0), egui::Sense::hover());
+                let (meter_rect, _resp) = ui.allocate_exact_size(Vec2::new(12.0, 110.0), egui::Sense::hover());
                 let painter = ui.painter_at(meter_rect);
-                painter.rect_filled(meter_rect, 2.0, Color32::from_rgb(0x18, 0x1b, 0x22));
+                painter.rect_filled(meter_rect, 2.0, Color32::from_rgb(0x11, 0x14, 0x1c));
                 painter.rect_stroke(meter_rect, 2.0, Stroke::new(1.0, COLOR_BORDER), egui::StrokeKind::Inside);
 
-                // Simulated active signal level
                 let level_ratio = if strip.is_muted {
                     0.0
                 } else {
@@ -127,11 +212,13 @@ fn render_channel_strip(ui: &mut Ui, strip: &mut AudioBusStrip) {
                 let slider = Slider::new(&mut strip.volume_db, -60.0..=6.0)
                     .vertical()
                     .show_value(false);
-                ui.add_sized(Vec2::new(28.0, 110.0), slider);
+                ui.add_sized(Vec2::new(26.0, 110.0), slider);
 
-                // Readout
+                // Readout & Pan
                 ui.vertical(|ui| {
                     ui.colored_label(COLOR_TEXT_NORMAL, format!("{:.1}\ndB", strip.volume_db));
+                    ui.add_space(8.0);
+                    rotary_arc_knob(ui, "Pan", &mut strip.pan, -1.0, 1.0, CHROMA_CYAN_2D);
                 });
             });
 
@@ -154,10 +241,24 @@ fn render_channel_strip(ui: &mut Ui, strip: &mut AudioBusStrip) {
 
             ui.separator();
 
-            // FX Rack
-            ui.collapsing("FX Rack", |ui| {
-                ui.checkbox(&mut strip.reverb_enabled, "Reverb");
-                ui.checkbox(&mut strip.eq_enabled, "3-Band EQ");
+            // Tactile FX Rack with Rotary Arc Knobs
+            ui.collapsing("🎛 Smart FX Rack", |ui| {
+                ui.checkbox(&mut strip.eq_enabled, "3-Band Parametric EQ");
+                if strip.eq_enabled {
+                    ui.horizontal_wrapped(|ui| {
+                        rotary_arc_knob(ui, "Low", &mut strip.eq_low_db, -12.0, 12.0, CHROMA_CYAN_2D);
+                        rotary_arc_knob(ui, "Mid", &mut strip.eq_mid_db, -12.0, 12.0, CHROMA_AMBER_AUDIO);
+                        rotary_arc_knob(ui, "High", &mut strip.eq_high_db, -12.0, 12.0, CHROMA_VIOLET_ANIM);
+                    });
+                }
+
+                ui.separator();
+                ui.checkbox(&mut strip.reverb_enabled, "Studio Reverb");
+                if strip.reverb_enabled {
+                    ui.horizontal(|ui| {
+                        rotary_arc_knob(ui, "Wet", &mut strip.reverb_wet, 0.0, 1.0, CHROMA_MINT_UI);
+                    });
+                }
             });
         });
     });

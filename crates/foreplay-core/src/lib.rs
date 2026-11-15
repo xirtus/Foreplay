@@ -8,11 +8,17 @@
 //! - Godot `ClassDB` / `@export` -> `bevy_reflect::Reflect` + `foreplay_ir::FeelSpecKnob`
 
 pub mod animation;
+pub mod ik_motion;
 pub mod navigation;
+pub mod pcg;
+pub mod rollback;
 pub mod ui_layout;
 
 pub use animation::*;
+pub use ik_motion::*;
 pub use navigation::*;
+pub use pcg::*;
+pub use rollback::*;
 pub use ui_layout::*;
 
 use bevy_ecs::hierarchy::ChildOf;
@@ -980,5 +986,183 @@ mod tests {
             .expect("3D navmesh path");
         assert_eq!(*path_3d.first().unwrap(), [1.0, 0.0, 1.0]);
         assert_eq!(*path_3d.last().unwrap(), [9.0, 0.0, 4.0]);
+    }
+
+    #[test]
+    fn speculative_frame_buffer_and_state_hashing_exactness() {
+        let mut scene = IrScene::new("RollbackPlaza");
+        let skater_id = NodeId::new(1, 1).unwrap();
+        scene.nodes.insert(
+            skater_id,
+            foreplay_ir::IrNode {
+                id: skater_id,
+                name: "Skater".into(),
+                class_name: "CharacterBody3D".into(),
+                parent: None,
+                instance_scene: None,
+                properties: BTreeMap::new(),
+                groups: vec!["skaters".into()],
+            },
+        );
+
+        let mut tree = SceneTree::from_ir(scene);
+        let mut buffer = SpeculativeFrameBuffer::new(64);
+
+        // Record base tick 0
+        buffer.record_tick(&tree, 0);
+        let hash0 = buffer.hash_at_tick(0).expect("hash at tick 0");
+
+        // Speculative branch: begin transaction
+        buffer.begin_transaction();
+        assert!(buffer.is_in_transaction());
+
+        // Step 10 ticks and mutate tree in speculative branch
+        for t in 1..=10 {
+            tree.step_frame();
+            if let Some(skater_node) = tree.active_scene.nodes.get_mut(&skater_id) {
+                skater_node
+                    .properties
+                    .insert("speed".into(), IrValue::F64(t as f64 * 2.0));
+            }
+            buffer.record_tick(&tree, t);
+        }
+
+        assert_eq!(tree.tick_count, 10);
+        assert_ne!(buffer.hash_at_tick(10).unwrap(), hash0);
+
+        // Roll back to tick 0
+        buffer.rollback_to_tick(&mut tree, 0).expect("rollback to tick 0");
+        assert_eq!(tree.tick_count, 0);
+        assert!(!buffer.is_in_transaction());
+        assert_eq!(state_hash(&tree), hash0);
+        assert!(!tree.active_scene.nodes[&skater_id].properties.contains_key("speed"));
+    }
+
+    #[test]
+    fn catmull_rom_spline_pcg_extruder_and_scatter_grid() {
+        let points = vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(10.0, 1.0, 0.0),
+            Vec3::new(20.0, 1.5, 5.0),
+            Vec3::new(30.0, 0.0, 10.0),
+        ];
+
+        let spline = CatmullRomSpline3D::new(points, false);
+        assert!(spline.total_length() > 30.0);
+
+        // Sample frame at mid-distance
+        let frame = spline.sample_frame(spline.total_length() * 0.5);
+        assert!(frame.tangent.is_normalized());
+        assert!(frame.normal.is_normalized());
+        assert!(frame.binormal.is_normalized());
+        assert!(frame.tangent.dot(frame.normal).abs() < 1e-4);
+
+        // Extrude skate handrail
+        let config = PcgExtrusionConfig {
+            profile: PcgProfile::RoundRail {
+                radius: 0.04,
+                radial_segments: 8,
+            },
+            step_distance: 0.5,
+            uv_scale: [1.0, 1.0],
+            generate_caps: true,
+        };
+        let mesh = PcgSplineExtruder::extrude(&spline, &config);
+        assert!(!mesh.positions.is_empty());
+        assert!(!mesh.indices.is_empty());
+        assert!(!mesh.collision_segments.is_empty());
+        assert_eq!(mesh.positions.len(), mesh.normals.len());
+        assert_eq!(mesh.positions.len(), mesh.uvs.len());
+
+        // Scatter street lamps/props
+        let grid = PcgScatterGrid {
+            bounds_min: Vec3::new(-20.0, 0.0, -20.0),
+            bounds_max: Vec3::new(20.0, 10.0, 20.0),
+            cell_size: 5.0,
+            seed: 42,
+            min_distance: 3.0,
+            min_height: -5.0,
+            max_height: 20.0,
+            max_slope_rad: std::f32::consts::FRAC_PI_4,
+            align_to_normal: true,
+        };
+        let instances = grid.scatter(|x, z| (0.1 * (x + z), Vec3::Y));
+        assert!(!instances.is_empty());
+        for inst in &instances {
+            assert!(inst.position.x >= -20.0 && inst.position.x <= 20.0);
+            assert!(inst.position.z >= -20.0 && inst.position.z <= 20.0);
+        }
+    }
+
+    #[test]
+    fn two_bone_ik_and_motion_matching_search() {
+        // Analytical Two-Bone IK test
+        let root = Vec3::new(0.0, 1.0, 0.0);
+        let mid = Vec3::new(0.0, 0.5, 0.0);
+        let tip = Vec3::new(0.0, 0.0, 0.0);
+        let target = Vec3::new(0.3, 0.1, 0.2);
+        let pole = Vec3::new(0.0, 0.5, 1.0); // Knee forward
+
+        let (new_mid, new_tip) = solve_two_bone_ik(root, mid, tip, target, pole);
+        let l1_orig = root.distance(mid);
+        let l2_orig = mid.distance(tip);
+        let l1_new = root.distance(new_mid);
+        let l2_new = new_mid.distance(new_tip);
+
+        assert!((l1_orig - l1_new).abs() < 1e-4, "Upper leg length must be preserved");
+        assert!((l2_orig - l2_new).abs() < 1e-4, "Lower leg length must be preserved");
+        assert!(new_tip.distance(target) < 1e-3, "Foot tip must reach target");
+
+        // FABRIK Chain IK test
+        let mut chain = vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, 2.0, 0.0),
+            Vec3::new(0.0, 3.0, 0.0),
+        ];
+        let chain_target = Vec3::new(1.0, 2.0, 0.5);
+        let reached = solve_fabrik_chain(&mut chain, chain_target, 0.01, 20);
+        assert!(reached);
+        assert!(chain[3].distance(chain_target) <= 0.01);
+
+        // Motion Matching feature database test
+        let mut db = PoseSearchDatabase::new();
+        db.add_sample(MotionSample {
+            sample_id: 1,
+            anim_id: "OllieStart".into(),
+            time: 0.1,
+            velocity: Vec3::new(5.0, 0.0, 0.0),
+            future_trajectory_200ms: Vec3::new(6.0, 0.2, 0.0),
+            left_foot_offset: Vec3::new(-0.2, -0.5, 0.1),
+            right_foot_offset: Vec3::new(0.2, -0.5, -0.1),
+        });
+        db.add_sample(MotionSample {
+            sample_id: 2,
+            anim_id: "PushHard".into(),
+            time: 0.3,
+            velocity: Vec3::new(8.0, 0.0, 0.0),
+            future_trajectory_200ms: Vec3::new(9.6, 0.0, 0.0),
+            left_foot_offset: Vec3::new(-0.2, -0.5, 0.3),
+            right_foot_offset: Vec3::new(0.2, -0.2, -0.4),
+        });
+
+        let query = MotionQuery {
+            target_velocity: Vec3::new(8.1, 0.0, 0.0),
+            target_trajectory_200ms: Vec3::new(9.5, 0.0, 0.0),
+            current_left_foot: Vec3::new(-0.2, -0.5, 0.3),
+            current_right_foot: Vec3::new(0.2, -0.2, -0.4),
+        };
+
+        let weights = MotionCostWeights::default();
+        let (best_sample, cost) = db.best_match(&query, &weights).expect("match found");
+        assert_eq!(best_sample.sample_id, 2);
+        assert!(cost < 0.1);
+
+        // Inertial blend test
+        let mut blend = InertialBlendState::new(Vec3::new(0.1, 0.0, 0.0), Vec3::ZERO, 0.2);
+        let offset0 = blend.evaluate(0.0);
+        assert!((offset0.x - 0.1).abs() < 1e-4);
+        blend.evaluate(0.21);
+        assert!(blend.is_finished());
     }
 }

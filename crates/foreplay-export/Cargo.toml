@@ -8,6 +8,7 @@ description = "Phase 6 One-Click Game Exporter (.fpck archive + Linux/SteamDeck,
 
 [dependencies]
 foreplay-ir = { path = "../foreplay-ir" }
+foreplay-threejs = { path = "../foreplay-threejs" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

@@ -1,11 +1,12 @@
-//! Top Menu Bar, Transport Bar, and Multi-Scene Tabs (`foreplay-editor`).
+//! Top Menu Bar, Transport Bar, Studio LCD HUD, and Multi-Scene Tabs (`foreplay-editor`).
 //!
 //! Provides:
-//! - Godot 4 top menu bar: Scene | Project | Debug | Editor | Help
-//! - Multi-scene document tab bar: `[ 🛹 ForeplayParkDemo.fscn × ] [ 🖥 UI_HUD.fscn × ] [ ➕ ]`
-//! - Center workspace switcher: 2D | 3D | Script | Atlas | Port Diff | AssetLib
+//! - Apple Pro / Godot top menu bar: Scene | Project | Debug | Editor | Help
+//! - Center smoked-glass LCD HUD: Timecode, BPM, FPS, Node count, Dual Target
+//! - Center workspace switcher: 2D | 3D | Model | Script | Three.js | Atlas | Port Diff | AssetLib
 //! - Left quick actions: Undo, Redo, Physics Backend toggle
-//! - Right PIE controls: ▶ Play, ⏸ Pause, ⏭ Step, ⏹ Stop, World Tick count.
+//! - Right PIE controls: ▶ Play, ⏸ Pause, ⏭ Step, ⏹ Stop, World Tick count
+//! - Theme preset switcher: Studio Obsidian Pro (macOS Logic Pro 11 + Final Cut Pro 11) <-> Classic Godot Slate
 
 use egui::{Color32, RichText, Ui};
 use crate::ForeplayEditorApp;
@@ -13,15 +14,17 @@ use crate::{EditorWorkspace, PhysicsBackendChoice};
 use crate::modals::ActiveModal;
 use crate::tabs::console::LogLevel;
 use crate::theme::{
-    COLOR_ACCENT_BLUE, COLOR_ERROR_RED, COLOR_SUCCESS_GREEN, COLOR_TEXT_MUTED,
-    COLOR_WARN_YELLOW,
+    CHROMA_CYAN_2D, CHROMA_EMERALD_THREEJS, CHROMA_GOLD_POLYAMOUR,
+    COLOR_ERROR_RED, COLOR_SUCCESS_GREEN, COLOR_TEXT_MUTED,
+    COLOR_WARN_YELLOW, EditorThemePreset, STUDIO_OBSIDIAN_ACCENT,
 };
+use crate::widgets::studio_lcd_hud;
 
 pub fn render_top_bar(app: &mut ForeplayEditorApp, ui: &mut Ui) {
-    // Row 1: Godot 4 Top Menu Bar & Transport Controls
+    // Row 1: Top Menu Bar, Center Studio LCD HUD, and Transport Controls
     ui.horizontal(|ui| {
         // Engine Logo
-        ui.label(RichText::new("FOREPLAY").strong().color(COLOR_ACCENT_BLUE));
+        ui.label(RichText::new("FOREPLAY").strong().color(STUDIO_OBSIDIAN_ACCENT));
         ui.separator();
 
         // 1. Scene Menu
@@ -92,7 +95,7 @@ pub fn render_top_bar(app: &mut ForeplayEditorApp, ui: &mut Ui) {
             }
         });
 
-        // 4. Editor Menu
+        // 4. Editor Menu (with Theme Switcher)
         ui.menu_button("Editor", |ui| {
             if ui.button("⌨ Command Palette (Ctrl+Shift+P)").clicked() {
                 app.active_modal = Some(ActiveModal::CommandPalette);
@@ -102,6 +105,19 @@ pub fn render_top_bar(app: &mut ForeplayEditorApp, ui: &mut Ui) {
                 app.active_modal = Some(ActiveModal::CreateNodeDialog);
                 ui.close();
             }
+            ui.separator();
+            ui.menu_button("🎨 Theme Preset", |ui| {
+                if ui.selectable_label(app.theme_preset == EditorThemePreset::StudioObsidianPro, "Studio Obsidian Pro (Logic & FCP)").clicked() {
+                    app.theme_preset = EditorThemePreset::StudioObsidianPro;
+                    app.log(LogLevel::Info, "Applied theme: Studio Obsidian Pro");
+                    ui.close();
+                }
+                if ui.selectable_label(app.theme_preset == EditorThemePreset::ClassicGodotSlate, "Classic Godot Slate").clicked() {
+                    app.theme_preset = EditorThemePreset::ClassicGodotSlate;
+                    app.log(LogLevel::Info, "Applied theme: Classic Godot Slate");
+                    ui.close();
+                }
+            });
         });
 
         ui.separator();
@@ -138,15 +154,13 @@ pub fn render_top_bar(app: &mut ForeplayEditorApp, ui: &mut Ui) {
 
         ui.separator();
 
-        // --- Center: Workspace Tabs ---
-        workspace_button(app, ui, EditorWorkspace::Workspace2D, "2D");
-        workspace_button(app, ui, EditorWorkspace::Workspace3D, "3D");
-        workspace_button(app, ui, EditorWorkspace::Script, "Script");
-        workspace_button(app, ui, EditorWorkspace::AtlasGraph, "Atlas");
-        workspace_button(app, ui, EditorWorkspace::PortDiff, "Port Diff");
-        workspace_button(app, ui, EditorWorkspace::AssetLib, "AssetLib");
+        // Center: Smoked-Glass Studio LCD HUD (Logic Pro / FCP style)
+        let timecode_secs = app.animation_state.playhead_secs as f64;
+        let bpm = 120.0f32;
+        let active_nodes = app.session.tree.active_scene.nodes.len();
+        studio_lcd_hud(ui, timecode_secs, bpm, app.fps, active_nodes, app.play_in_editor_running);
 
-        // --- Right: Play-In-Editor (PIE) Transport Controls ---
+        // Right: Play-In-Editor (PIE) Transport Controls
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // Stop button
             let stop_btn = egui::Button::new(RichText::new("⏹ Stop").color(if app.play_in_editor_running {
@@ -197,8 +211,22 @@ pub fn render_top_bar(app: &mut ForeplayEditorApp, ui: &mut Ui) {
         });
     });
 
-    // Row 2: Multi-Scene Tab Bar
-    render_scene_tabs(app, ui);
+    // Row 2: Multi-Scene Tab Bar & Workspace Switcher Tabs
+    ui.horizontal(|ui| {
+        render_scene_tabs(app, ui);
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // Workspace Tabs (8 variants: AssetLib, Port Diff, Atlas, Three.js, Script, Model, 3D, 2D)
+            workspace_button(app, ui, EditorWorkspace::AssetLib, "AssetLib");
+            workspace_button(app, ui, EditorWorkspace::PortDiff, "Port Diff");
+            workspace_button(app, ui, EditorWorkspace::AtlasGraph, "Atlas");
+            workspace_button(app, ui, EditorWorkspace::ThreeJsWeb, "Three.js");
+            workspace_button(app, ui, EditorWorkspace::Script, "Script");
+            workspace_button(app, ui, EditorWorkspace::ModelPolyamour, "Model");
+            workspace_button(app, ui, EditorWorkspace::Workspace3D, "3D");
+            workspace_button(app, ui, EditorWorkspace::Workspace2D, "2D");
+        });
+    });
 }
 
 /// Renders the multi-scene tab bar above the viewports.
@@ -253,8 +281,15 @@ pub fn render_scene_tabs(app: &mut ForeplayEditorApp, ui: &mut Ui) {
 
 fn workspace_button(app: &mut ForeplayEditorApp, ui: &mut Ui, ws: EditorWorkspace, label: &str) {
     let is_active = app.active_workspace == ws;
+    let accent_color = match ws {
+        EditorWorkspace::ModelPolyamour => CHROMA_GOLD_POLYAMOUR,
+        EditorWorkspace::ThreeJsWeb => CHROMA_EMERALD_THREEJS,
+        EditorWorkspace::Workspace2D => CHROMA_CYAN_2D,
+        _ => STUDIO_OBSIDIAN_ACCENT,
+    };
+
     let text = if is_active {
-        RichText::new(label).strong().color(Color32::WHITE)
+        RichText::new(label).strong().color(accent_color)
     } else {
         RichText::new(label).color(Color32::from_rgb(0xc0, 0xc5, 0xd0))
     };

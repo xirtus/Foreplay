@@ -1,8 +1,13 @@
 pub mod effects;
+pub mod procedural_synth;
+pub mod timeline;
+
 pub use effects::{
     AudioEffect, AudioEffectChorus, AudioEffectEq3Band, AudioEffectLimiter, AudioEffectLowPassFilter,
     AudioEffectReverb,
 };
+pub use procedural_synth::{SkateFoleySynth, SpatialPanner3D, SpectrumAnalyzer32};
+pub use timeline::{AudioClip, AudioTimeline, AudioTimelineTrack, SAMPLE_RATE};
 
 use std::collections::BTreeMap;
 use std::fmt;

@@ -1,0 +1,126 @@
+{
+  "format": "3jse.scene",
+  "name": "NeonSkatePark",
+  "metadata": {
+    "version": 4.5,
+    "type": "Object",
+    "generator": "Foreplay 3JSE Template"
+  },
+  "feelSpec": {
+    "skate_speed": 18.0,
+    "ollie_pop": 8.5,
+    "grind_friction": 0.05,
+    "air_control": 1.2,
+    "camera_fov": 75.0
+  },
+  "signals": [
+    {
+      "from_node": { "index": 2, "generation": 1 },
+      "signal_name": "trick_landed",
+      "to_node": { "index": 3, "generation": 1 },
+      "method_name": "add_trauma"
+    },
+    {
+      "from_node": { "index": 2, "generation": 1 },
+      "signal_name": "bailed",
+      "to_node": { "index": 6, "generation": 1 },
+      "method_name": "on_bail"
+    },
+    {
+      "from_node": { "index": 7, "generation": 1 },
+      "signal_name": "pressed",
+      "to_node": { "index": 2, "generation": 1 },
+      "method_name": "reset_run"
+    }
+  ],
+  "nodes": [
+    {
+      "id": { "index": 1, "generation": 1 },
+      "name": "WorldRoot",
+      "class_name": "Node3D",
+      "parent": null,
+      "properties": {
+        "position": { "Vec3": [0.0, 0.0, 0.0] }
+      },
+      "groups": ["world"]
+    },
+    {
+      "id": { "index": 2, "generation": 1 },
+      "name": "NeonSkater",
+      "class_name": "CharacterBody3D",
+      "parent": { "index": 1, "generation": 1 },
+      "properties": {
+        "position": { "Vec3": [0.0, 0.5, 0.0] },
+        "script": { "String": "res://scripts/skater.gd" }
+      },
+      "groups": ["player", "skater"]
+    },
+    {
+      "id": { "index": 3, "generation": 1 },
+      "name": "FollowCamera",
+      "class_name": "Camera3D",
+      "parent": { "index": 2, "generation": 1 },
+      "properties": {
+        "position": { "Vec3": [0.0, 2.5, 5.0] },
+        "fov": { "F64": 75.0 }
+      },
+      "groups": ["camera"]
+    },
+    {
+      "id": { "index": 4, "generation": 1 },
+      "name": "CyberSun",
+      "class_name": "DirectionalLight3D",
+      "parent": { "index": 1, "generation": 1 },
+      "properties": {
+        "position": { "Vec3": [10.0, 20.0, 10.0] },
+        "color": { "Color": [0.2, 0.9, 1.0, 1.0] },
+        "light_energy": { "F64": 1.5 }
+      },
+      "groups": ["lighting"]
+    },
+    {
+      "id": { "index": 5, "generation": 1 },
+      "name": "HalfpipeRamp",
+      "class_name": "MeshInstance3D",
+      "parent": { "index": 1, "generation": 1 },
+      "properties": {
+        "position": { "Vec3": [0.0, -0.5, 0.0] },
+        "size": { "Vec3": [20.0, 1.0, 40.0] },
+        "color": { "Color": [0.1, 0.05, 0.2, 1.0] },
+        "roughness": { "F64": 0.2 },
+        "metalness": { "F64": 0.8 }
+      },
+      "groups": ["environment", "skate_surface"]
+    },
+    {
+      "id": { "index": 6, "generation": 1 },
+      "name": "ScoreHUD",
+      "class_name": "Label",
+      "parent": { "index": 1, "generation": 1 },
+      "properties": {
+        "text": { "String": "SCORE: 000000 | MULTIPLIER: 1X" }
+      },
+      "groups": ["ui"]
+    },
+    {
+      "id": { "index": 7, "generation": 1 },
+      "name": "ResetRunButton",
+      "class_name": "Button",
+      "parent": { "index": 1, "generation": 1 },
+      "properties": {
+        "text": { "String": "↺ Restart Run" }
+      },
+      "groups": ["ui"]
+    },
+    {
+      "id": { "index": 8, "generation": 1 },
+      "name": "SparkParticles",
+      "class_name": "GPUParticles3D",
+      "parent": { "index": 2, "generation": 1 },
+      "properties": {
+        "color": { "Color": [0.0, 1.0, 0.8, 1.0] }
+      },
+      "groups": ["vfx"]
+    }
+  ]
+}

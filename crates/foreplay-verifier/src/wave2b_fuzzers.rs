@@ -785,6 +785,17 @@ pub fn verify_project_exporter_bundle_invariants_suite() -> VerificationReceipt 
                     invariants_held = false;
                 }
             }
+
+            ExportTarget::ThreeJsWebProject => {
+                if output.primary_artifact != "package.json" {
+                    invariants_held = false;
+                }
+                if !output.bundle_files.contains_key("package.json")
+                    || !output.bundle_files.contains_key("game.fpck")
+                {
+                    invariants_held = false;
+                }
+            }
         }
     }
 

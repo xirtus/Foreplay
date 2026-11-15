@@ -12,6 +12,7 @@ bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
 bevy_math = { workspace = true, features = ["bevy_reflect"] }
 thiserror = { workspace = true }
+serde = { workspace = true }
 
 
 [lints]

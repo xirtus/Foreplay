@@ -8,6 +8,8 @@ description = "3JSE-style Atlas semantic meaning graph compiler, FeelSpec resolv
 
 [dependencies]
 foreplay-ir = { path = "../foreplay-ir" }
+serde = { workspace = true }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true

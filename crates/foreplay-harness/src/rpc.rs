@@ -97,6 +97,8 @@ impl HarnessRpcServer {
             "foreplay/step" => Self::handle_step(session, params),
             "foreplay/import_tscn" => Self::handle_import_tscn(session, params),
             "foreplay/export_fscn" => Self::handle_export_fscn(session),
+            "foreplay/export_threejs" => Self::handle_export_threejs(session, params),
+            "foreplay/import_threejs" => Self::handle_import_threejs(session, params),
             _ => Err(RpcError::method_not_found(method)),
         }
     }
@@ -672,6 +674,7 @@ impl HarnessRpcServer {
             "MacOsAppBundle" | "macos" | "mac" | "app" => foreplay_export::ExportTarget::MacOsAppBundle,
             "WebGpuBrowserUrl" | "web" | "webgpu" | "html5" => foreplay_export::ExportTarget::WebGpuBrowserUrl,
             "SexOsPackage" | "sexos" => foreplay_export::ExportTarget::SexOsPackage,
+            "ThreeJsWebProject" | "threejs" | "three" | "3jse" => foreplay_export::ExportTarget::ThreeJsWebProject,
             other => return Err(RpcError::invalid_params(format!("unknown export target '{other}'"))),
         };
 
@@ -710,6 +713,107 @@ impl HarnessRpcServer {
             "primary_artifact": output.primary_artifact,
             "bundle_file_count": output.bundle_files.len(),
             "archive_size": output.archive_bytes.len()
+        }))
+    }
+
+    fn handle_export_threejs(session: &HarnessSession, params: &Value) -> Result<Value, RpcError> {
+        let project_name = params
+            .get("project_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&session.tree.active_scene.name)
+            .to_string();
+
+        let use_webgpu_renderer = params
+            .get("use_webgpu_renderer")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        let include_feel_dev_hud = params
+            .get("include_feel_dev_hud")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        let include_atlas_json = params
+            .get("include_atlas_json")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        let tone_mapping = match params.get("tone_mapping").and_then(|v| v.as_str()) {
+            Some("ACESFilmic") => foreplay_threejs::ThreeToneMapping::ACESFilmic,
+            Some("Neutral") => foreplay_threejs::ThreeToneMapping::Neutral,
+            _ => foreplay_threejs::ThreeToneMapping::AgX,
+        };
+
+        let opts = foreplay_threejs::ThreeJsExportOptions {
+            project_name: project_name.clone(),
+            use_webgpu_renderer,
+            include_feel_dev_hud,
+            include_atlas_json,
+            tone_mapping,
+        };
+
+        let mut gd_scripts = BTreeMap::new();
+        let mut ts_scripts = BTreeMap::new();
+
+        for (&node_id, node) in &session.tree.active_scene.nodes {
+            if let Some(IrValue::String(src)) = node.properties.get("gdscript") {
+                gd_scripts.insert(node_id, src.clone());
+            } else if let Some(IrValue::String(src)) = node.properties.get("script") {
+                if src.contains("extends ") || src.contains("func ") {
+                    gd_scripts.insert(node_id, src.clone());
+                } else if src.contains("class ") || src.contains("function ") {
+                    ts_scripts.insert(node_id, src.clone());
+                }
+            }
+        }
+
+        let bundle = foreplay_threejs::compile_ir_to_threejs_project(
+            &session.tree.active_scene,
+            &gd_scripts,
+            &ts_scripts,
+            &opts,
+        )
+        .map_err(|e| RpcError::internal(format!("Three.js export failed: {e}")))?;
+
+        let threejs_json = foreplay_threejs::export_ir_to_threejs_json(&session.tree.active_scene);
+        let file_keys: Vec<String> = bundle.files.keys().cloned().collect();
+
+        Ok(json!({
+            "success": true,
+            "project_name": project_name,
+            "node_count": bundle.node_count,
+            "transpiled_scripts": bundle.transpiled_scripts,
+            "file_count": bundle.files.len(),
+            "files": file_keys,
+            "bundle": bundle.files,
+            "threejs_json": threejs_json
+        }))
+    }
+
+    fn handle_import_threejs(session: &mut HarnessSession, params: &Value) -> Result<Value, RpcError> {
+        let source = params
+            .get("source")
+            .or_else(|| params.get("json"))
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| RpcError::invalid_params("missing 'source' or 'json' string"))?;
+
+        let scene = foreplay_threejs::import_threejs_json_to_ir(source)
+            .map_err(|e| RpcError::internal(format!("Three.js import failed: {e}")))?;
+
+        let node_count = scene.nodes.len();
+        let connection_count = scene.connections.len();
+        let feel_knobs_count = scene.feel_overrides.len();
+        let scene_name = scene.name.clone();
+
+        session.tree.active_scene = scene;
+        session.tree.rebuild_world_from_ir();
+
+        Ok(json!({
+            "success": true,
+            "scene_name": scene_name,
+            "node_count": node_count,
+            "connection_count": connection_count,
+            "feel_knobs_count": feel_knobs_count
         }))
     }
 }
@@ -1093,5 +1197,59 @@ mod tests {
         let export_val: Value = serde_json::from_str(&export_res).unwrap();
         assert_eq!(export_val["result"]["success"], true);
         assert_eq!(export_val["result"]["primary_artifact"], "game.x86_64");
+
+        // 8. Export Three.js Game Project
+        let three_res = HarnessRpcServer::handle_json(
+            &mut session,
+            r#"{
+                "jsonrpc": "2.0",
+                "id": 29,
+                "method": "foreplay/export_threejs",
+                "params": {
+                    "project_name": "SkateRpcGame",
+                    "use_webgpu_renderer": true
+                }
+            }"#,
+        );
+        let three_val: Value = serde_json::from_str(&three_res).unwrap();
+        assert_eq!(three_val["result"]["success"], true);
+        assert_eq!(three_val["result"]["project_name"], "SkateRpcGame");
+        let three_files = three_val["result"]["files"].as_array().unwrap();
+        assert!(three_files.iter().any(|f| f == "package.json"));
+        assert!(three_files.iter().any(|f| f == "src/main.ts"));
+        assert!(three_files.iter().any(|f| f == "src/scene.ts"));
+        assert!(three_files.iter().any(|f| f == "src/feel.ts"));
+
+        let exported_json_str = three_val["result"]["threejs_json"].as_str().unwrap();
+        assert!(exported_json_str.contains("Scene"));
+
+        // 9. Import Three.js Scene back into Harness
+        let import_three_res = HarnessRpcServer::handle_json(
+            &mut session,
+            &format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"foreplay/import_threejs\",\"params\":{{\"source\":{}}}}}",
+                serde_json::to_string(&exported_json_str).unwrap()
+            ),
+        );
+        let import_three_val: Value = serde_json::from_str(&import_three_res).unwrap();
+        assert_eq!(import_three_val["result"]["success"], true);
+        assert!(import_three_val["result"]["node_count"].as_u64().unwrap() >= 1);
+
+        // 10. Export Project target ThreeJsWebProject
+        let export_three_target_res = HarnessRpcServer::handle_json(
+            &mut session,
+            r#"{
+                "jsonrpc": "2.0",
+                "id": 31,
+                "method": "foreplay/export_project",
+                "params": {
+                    "target": "ThreeJsWebProject",
+                    "game_title": "ThreeJsWebSkater"
+                }
+            }"#,
+        );
+        let export_three_target_val: Value = serde_json::from_str(&export_three_target_res).unwrap();
+        assert_eq!(export_three_target_val["result"]["success"], true);
+        assert_eq!(export_three_target_val["result"]["primary_artifact"], "package.json");
     }
 }

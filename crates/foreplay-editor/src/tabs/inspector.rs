@@ -7,9 +7,12 @@ use egui::{DragValue, RichText, ScrollArea, Ui};
 use foreplay_ir::{EditorCommand, IrValue, NodeId};
 use crate::ForeplayEditorApp;
 use crate::theme::{
+    CHROMA_CORAL_3D, CHROMA_CYAN_2D, CHROMA_GOLD_POLYAMOUR, CHROMA_VIOLET_ANIM,
     COLOR_ACCENT_BLUE, COLOR_AXIS_X, COLOR_AXIS_Y, COLOR_AXIS_Z, COLOR_ERROR_RED,
     COLOR_SUCCESS_GREEN, COLOR_TEXT_MUTED, COLOR_TEXT_NORMAL, COLOR_WARN_YELLOW,
+    STUDIO_OBSIDIAN_ACCENT,
 };
+use crate::widgets::rotary_arc_knob_f64;
 
 pub fn show_inspector(app: &mut ForeplayEditorApp, ui: &mut Ui) {
     ScrollArea::vertical().show(ui, |ui| {
@@ -247,6 +250,59 @@ pub fn show_feel_spec(app: &mut ForeplayEditorApp, ui: &mut Ui) {
         ui.separator();
 
         let feel_overrides = app.session.tree.active_scene.feel_overrides.clone();
+
+        // Logic Pro 11-style Tactile Smart Controls Rack
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("🎛 Smart Controls Rack").strong().color(STUDIO_OBSIDIAN_ACCENT));
+                ui.colored_label(COLOR_TEXT_MUTED, "(Swept 270° Tactile Rotary Knobs)");
+            });
+
+            ui.horizontal_wrapped(|ui| {
+                // 1. Ollie Pop Knob
+                let mut pop_val = *feel_overrides.get("ollie_pop_impulse").unwrap_or(&6.8);
+                if rotary_arc_knob_f64(ui, "Ollie Pop", &mut pop_val, 0.0, 20.0, CHROMA_CYAN_2D) {
+                    app.execute_command(EditorCommand::TuneFeelSpec {
+                        key: "ollie_pop_impulse".into(),
+                        old_value: feel_overrides.get("ollie_pop_impulse").copied(),
+                        new_value: Some(pop_val),
+                    });
+                }
+
+                // 2. Grind Snap Knob
+                let mut grind_val = *feel_overrides.get("grind_snap_radius").unwrap_or(&0.35);
+                if rotary_arc_knob_f64(ui, "Grind Snap", &mut grind_val, 0.05, 2.0, CHROMA_GOLD_POLYAMOUR) {
+                    app.execute_command(EditorCommand::TuneFeelSpec {
+                        key: "grind_snap_radius".into(),
+                        old_value: feel_overrides.get("grind_snap_radius").copied(),
+                        new_value: Some(grind_val),
+                    });
+                }
+
+                // 3. Gravity Scale Knob
+                let mut grav_val = *feel_overrides.get("gravity_scale").unwrap_or(&1.2);
+                if rotary_arc_knob_f64(ui, "Gravity", &mut grav_val, 0.1, 5.0, CHROMA_CORAL_3D) {
+                    app.execute_command(EditorCommand::TuneFeelSpec {
+                        key: "gravity_scale".into(),
+                        old_value: feel_overrides.get("gravity_scale").copied(),
+                        new_value: Some(grav_val),
+                    });
+                }
+
+                // 4. Camera FOV Knob
+                let mut fov_val = *feel_overrides.get("camera_fov").unwrap_or(&75.0);
+                if rotary_arc_knob_f64(ui, "Cam FOV", &mut fov_val, 30.0, 120.0, CHROMA_VIOLET_ANIM) {
+                    app.execute_command(EditorCommand::TuneFeelSpec {
+                        key: "camera_fov".into(),
+                        old_value: feel_overrides.get("camera_fov").copied(),
+                        new_value: Some(fov_val),
+                    });
+                }
+            });
+        });
+
+        ui.separator();
+        ui.label(RichText::new("Parametric Fader Sliders").strong());
 
         // 1. Ollie Pop Impulse (Jump Height)
         feel_slider_row(
