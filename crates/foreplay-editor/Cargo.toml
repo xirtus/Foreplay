@@ -1,0 +1,24 @@
+[package]
+name = "foreplay-editor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-3.0-only"
+description = "Godot-parity dockable game editor (egui + egui_dock over wgpu & SexOS Silk/egui backend)"
+
+[dependencies]
+foreplay-ir = { path = "../foreplay-ir" }
+foreplay-core = { path = "../foreplay-core" }
+foreplay-platform = { path = "../foreplay-platform" }
+foreplay-render = { path = "../foreplay-render" }
+foreplay-physics = { path = "../foreplay-physics" }
+foreplay-audio = { path = "../foreplay-audio" }
+foreplay-net = { path = "../foreplay-net" }
+foreplay-script = { path = "../foreplay-script" }
+foreplay-gdscript = { path = "../foreplay-gdscript" }
+foreplay-atlas = { path = "../foreplay-atlas" }
+foreplay-harness = { path = "../foreplay-harness" }
+foreplay-porthost = { path = "../foreplay-porthost" }
+
+[lints]
+workspace = true

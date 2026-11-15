@@ -1,0 +1,13 @@
+[package]
+name = "foreplay-porthost"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-3.0-only"
+description = "BYO-ROM retail archive mount (port://), RustPorts wave runner, and frame-by-frame Differential Oracle"
+
+[dependencies]
+foreplay-ir = { path = "../foreplay-ir" }
+
+[lints]
+workspace = true

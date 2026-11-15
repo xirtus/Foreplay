@@ -1,0 +1,13 @@
+[package]
+name = "foreplay-physics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MPL-2.0"
+description = "PhysicsServer2D/3D with live hotswapping between Rapier and faithful game-port physics"
+
+[dependencies]
+foreplay-ir = { path = "../foreplay-ir" }
+
+[lints]
+workspace = true

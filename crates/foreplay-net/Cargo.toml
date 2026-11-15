@@ -1,0 +1,13 @@
+[package]
+name = "foreplay-net"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MPL-2.0"
+description = "Replay-frame multiplayer sync, deterministic input lockstep, and dedicated headless server"
+
+[dependencies]
+foreplay-ir = { path = "../foreplay-ir" }
+
+[lints]
+workspace = true

@@ -1,0 +1,18 @@
+/target/
+**/*.rs.bk
+*.pdb
+.DS_Store
+
+# Foreplay local runtime & PortHost BYO-ROM mounts (never commit proprietary game assets)
+/wip-bench/
+/saves/
+/port_mounts/
+config.json
+online-config.json
+controller_config.json
+release-secret.txt
+*.xex
+*.pak
+*.viv
+*.big
+*.wad

@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/foreplay-ir",
+    "crates/foreplay-core",
+    "crates/foreplay-platform",
+    "crates/foreplay-render",
+    "crates/foreplay-physics",
+    "crates/foreplay-audio",
+    "crates/foreplay-net",
+    "crates/foreplay-script",
+    "crates/foreplay-gdscript",
+    "crates/foreplay-atlas",
+    "crates/foreplay-harness",
+    "crates/foreplay-porthost",
+    "crates/foreplay-editor",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+repository = "https://github.com/xirtus/foreplay"
+homepage = "https://sexos.dev"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
+dbg_macro = "warn"
+todo = "warn"

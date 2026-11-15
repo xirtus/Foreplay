@@ -1,0 +1,14 @@
+[package]
+name = "foreplay-render"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MPL-2.0"
+description = "Godot-style RenderingServer RIDs over wgpu + SexOS scanout fallback"
+
+[dependencies]
+foreplay-ir = { path = "../foreplay-ir" }
+foreplay-platform = { path = "../foreplay-platform" }
+
+[lints]
+workspace = true

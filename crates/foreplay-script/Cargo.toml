@@ -1,0 +1,13 @@
+[package]
+name = "foreplay-script"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MPL-2.0"
+description = "Native Rust hot-reload scripting host and rustports-quickjs TypeScript/JS bridge"
+
+[dependencies]
+foreplay-ir = { path = "../foreplay-ir" }
+
+[lints]
+workspace = true

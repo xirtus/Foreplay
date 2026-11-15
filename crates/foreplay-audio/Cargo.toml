@@ -1,0 +1,13 @@
+[package]
+name = "foreplay-audio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MPL-2.0"
+description = "AudioServer bus mixer and pluggable audio decoder trait (Vorbis, Opus, ported XMA)"
+
+[dependencies]
+foreplay-ir = { path = "../foreplay-ir" }
+
+[lints]
+workspace = true

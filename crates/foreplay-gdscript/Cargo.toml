@@ -1,0 +1,13 @@
+[package]
+name = "foreplay-gdscript"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MPL-2.0"
+description = "Godot 4 GDScript (.gd) compatibility front-end compiling into Foreplay Gameplay IR"
+
+[dependencies]
+foreplay-ir = { path = "../foreplay-ir" }
+
+[lints]
+workspace = true

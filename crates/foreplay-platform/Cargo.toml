@@ -1,0 +1,19 @@
+[package]
+name = "foreplay-platform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MPL-2.0"
+description = "Cross-platform host bridge for Linux/Wayland/SteamDeck, macOS, Windows, WebGPU, and SexOS (Silk/egui)"
+
+[features]
+default = ["desktop-host"]
+desktop-host = []
+sexos-userspace = []
+webgpu-browser = []
+
+[dependencies]
+foreplay-ir = { path = "../foreplay-ir" }
+
+[lints]
+workspace = true

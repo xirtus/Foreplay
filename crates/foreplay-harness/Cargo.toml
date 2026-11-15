@@ -1,0 +1,15 @@
+[package]
+name = "foreplay-harness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-3.0-only"
+description = "3JSE-style AI Agent API / MCP server, Undo/Redo journal, and headless verification gates"
+
+[dependencies]
+foreplay-ir = { path = "../foreplay-ir" }
+foreplay-core = { path = "../foreplay-core" }
+foreplay-atlas = { path = "../foreplay-atlas" }
+
+[lints]
+workspace = true

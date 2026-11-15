@@ -1,0 +1,10 @@
+[package]
+name = "foreplay-ir"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MPL-2.0"
+description = "Canonical Gameplay IR, generational handles, FeelSpec metadata, and invertible EditorCommand bus for Foreplay Game Engine"
+
+[lints]
+workspace = true
