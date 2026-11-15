@@ -4,7 +4,7 @@
 //! and headless verification through standard JSON-RPC 2.0 protocols.
 
 use crate::HarnessSession;
-use foreplay_ir::{EditorCommand, IrNode, IrValue, NodeId};
+use foreplay_ir::{EditorCommand, IrNode, IrValue, NodeId, SignalConnection};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
@@ -84,6 +84,14 @@ impl HarnessRpcServer {
             "foreplay/set_property" => Self::handle_set_property(session, params),
             "foreplay/remove_node" => Self::handle_remove_node(session, params),
             "foreplay/tune_feel" => Self::handle_tune_feel(session, params),
+            "foreplay/rename_node" => Self::handle_rename_node(session, params),
+            "foreplay/reparent_node" => Self::handle_reparent_node(session, params),
+            "foreplay/connect_signal" => Self::handle_connect_signal(session, params),
+            "foreplay/disconnect_signal" => Self::handle_disconnect_signal(session, params),
+            "foreplay/set_groups" => Self::handle_set_groups(session, params),
+            "foreplay/batch" => Self::handle_batch(session, params),
+            "foreplay/run_gdscript_ticks" => Self::handle_run_gdscript_ticks(session, params),
+            "foreplay/export_project" => Self::handle_export_project(session, params),
             "foreplay/undo" => Self::handle_undo(session),
             "foreplay/redo" => Self::handle_redo(session),
             "foreplay/step" => Self::handle_step(session, params),
@@ -391,6 +399,319 @@ impl HarnessRpcServer {
             "fscn": fscn_text
         }))
     }
+
+    fn handle_rename_node(session: &mut HarnessSession, params: &Value) -> Result<Value, RpcError> {
+        let node_id_val = params
+            .get("node_id")
+            .ok_or_else(|| RpcError::invalid_params("missing 'node_id'"))?;
+        let node_id = parse_node_id_val(node_id_val)
+            .ok_or_else(|| RpcError::invalid_params("invalid 'node_id'"))?;
+        let new_name = params
+            .get("new_name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| RpcError::invalid_params("missing 'new_name'"))?
+            .to_string();
+
+        let old_name = session
+            .tree
+            .active_scene
+            .nodes
+            .get(&node_id)
+            .map(|n| n.name.clone())
+            .ok_or_else(|| RpcError::invalid_params(format!("node {node_id:?} not found")))?;
+
+        session
+            .execute(EditorCommand::RenameNode {
+                node_id,
+                old_name,
+                new_name,
+            })
+            .map_err(|e| RpcError::internal(format!("failed renaming node: {e}")))?;
+
+        Ok(json!({
+            "success": true,
+            "node_id": { "index": node_id.index, "generation": node_id.generation.get() }
+        }))
+    }
+
+    fn handle_reparent_node(session: &mut HarnessSession, params: &Value) -> Result<Value, RpcError> {
+        let node_id_val = params
+            .get("node_id")
+            .ok_or_else(|| RpcError::invalid_params("missing 'node_id'"))?;
+        let node_id = parse_node_id_val(node_id_val)
+            .ok_or_else(|| RpcError::invalid_params("invalid 'node_id'"))?;
+        let new_parent = params.get("new_parent").and_then(parse_node_id_val);
+
+        let old_parent = session
+            .tree
+            .active_scene
+            .nodes
+            .get(&node_id)
+            .map(|n| n.parent)
+            .ok_or_else(|| RpcError::invalid_params(format!("node {node_id:?} not found")))?;
+
+        session
+            .execute(EditorCommand::ReparentNode {
+                node_id,
+                old_parent,
+                new_parent,
+            })
+            .map_err(|e| RpcError::internal(format!("failed reparenting node: {e}")))?;
+
+        Ok(json!({
+            "success": true,
+            "node_id": { "index": node_id.index, "generation": node_id.generation.get() }
+        }))
+    }
+
+    fn handle_connect_signal(session: &mut HarnessSession, params: &Value) -> Result<Value, RpcError> {
+        let from_node = params
+            .get("from_node")
+            .and_then(parse_node_id_val)
+            .ok_or_else(|| RpcError::invalid_params("missing 'from_node'"))?;
+        let signal_name = params
+            .get("signal_name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| RpcError::invalid_params("missing 'signal_name'"))?
+            .to_string();
+        let to_node = params
+            .get("to_node")
+            .and_then(parse_node_id_val)
+            .ok_or_else(|| RpcError::invalid_params("missing 'to_node'"))?;
+        let method_name = params
+            .get("method_name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| RpcError::invalid_params("missing 'method_name'"))?
+            .to_string();
+
+        let connection = SignalConnection {
+            from_node,
+            signal_name,
+            to_node,
+            method_name,
+        };
+
+        session
+            .execute(EditorCommand::ConnectSignal { connection })
+            .map_err(|e| RpcError::internal(format!("failed connecting signal: {e}")))?;
+
+        Ok(json!({ "success": true }))
+    }
+
+    fn handle_disconnect_signal(session: &mut HarnessSession, params: &Value) -> Result<Value, RpcError> {
+        let from_node = params
+            .get("from_node")
+            .and_then(parse_node_id_val)
+            .ok_or_else(|| RpcError::invalid_params("missing 'from_node'"))?;
+        let signal_name = params
+            .get("signal_name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| RpcError::invalid_params("missing 'signal_name'"))?
+            .to_string();
+        let to_node = params
+            .get("to_node")
+            .and_then(parse_node_id_val)
+            .ok_or_else(|| RpcError::invalid_params("missing 'to_node'"))?;
+        let method_name = params
+            .get("method_name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| RpcError::invalid_params("missing 'method_name'"))?
+            .to_string();
+
+        let connection = SignalConnection {
+            from_node,
+            signal_name,
+            to_node,
+            method_name,
+        };
+
+        session
+            .execute(EditorCommand::DisconnectSignal { connection })
+            .map_err(|e| RpcError::internal(format!("failed disconnecting signal: {e}")))?;
+
+        Ok(json!({ "success": true }))
+    }
+
+    fn handle_set_groups(session: &mut HarnessSession, params: &Value) -> Result<Value, RpcError> {
+        let node_id_val = params
+            .get("node_id")
+            .ok_or_else(|| RpcError::invalid_params("missing 'node_id'"))?;
+        let node_id = parse_node_id_val(node_id_val)
+            .ok_or_else(|| RpcError::invalid_params("invalid 'node_id'"))?;
+        let new_groups: Vec<String> = params
+            .get("groups")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| RpcError::invalid_params("missing 'groups' array"))?
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect();
+
+        let old_groups = session
+            .tree
+            .active_scene
+            .nodes
+            .get(&node_id)
+            .map(|n| n.groups.clone())
+            .ok_or_else(|| RpcError::invalid_params(format!("node {node_id:?} not found")))?;
+
+        session
+            .execute(EditorCommand::SetGroups {
+                node_id,
+                old_groups,
+                new_groups,
+            })
+            .map_err(|e| RpcError::internal(format!("failed setting groups: {e}")))?;
+
+        Ok(json!({
+            "success": true,
+            "node_id": { "index": node_id.index, "generation": node_id.generation.get() }
+        }))
+    }
+
+    fn handle_batch(session: &mut HarnessSession, params: &Value) -> Result<Value, RpcError> {
+        let label = params
+            .get("label")
+            .and_then(|v| v.as_str())
+            .unwrap_or("BatchCommand")
+            .to_string();
+        let cmds_arr = params
+            .get("commands")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| RpcError::invalid_params("missing 'commands' array"))?;
+
+        let mut commands = Vec::new();
+        for cmd_val in cmds_arr {
+            if let Ok(cmd) = serde_json::from_value::<EditorCommand>(cmd_val.clone()) {
+                commands.push(cmd);
+            } else {
+                return Err(RpcError::invalid_params(format!("failed parsing command in batch: {cmd_val:?}")));
+            }
+        }
+
+        session
+            .execute(EditorCommand::Batch { label, commands })
+            .map_err(|e| RpcError::internal(format!("failed executing batch command: {e}")))?;
+
+        session.tree.rebuild_world_from_ir();
+
+        Ok(json!({ "success": true }))
+    }
+
+    fn handle_run_gdscript_ticks(session: &mut HarnessSession, params: &Value) -> Result<Value, RpcError> {
+        let node_id_val = params
+            .get("node_id")
+            .ok_or_else(|| RpcError::invalid_params("missing 'node_id'"))?;
+        let node_id = parse_node_id_val(node_id_val)
+            .ok_or_else(|| RpcError::invalid_params("invalid 'node_id'"))?;
+        let ticks = params.get("ticks").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+        let dt = params.get("dt").and_then(|v| v.as_f64()).unwrap_or(1.0 / 60.0);
+
+        let mut node = session
+            .tree
+            .active_scene
+            .nodes
+            .get(&node_id)
+            .cloned()
+            .ok_or_else(|| RpcError::invalid_params(format!("node {node_id:?} not found")))?;
+
+        let source = if let Some(s) = params.get("source").and_then(|v| v.as_str()) {
+            s.to_string()
+        } else if let Some(IrValue::String(s)) = node.properties.get("gdscript") {
+            s.clone()
+        } else if let Some(IrValue::String(s)) = node.properties.get("script") {
+            s.clone()
+        } else {
+            return Err(RpcError::invalid_params("no gdscript source found for node"));
+        };
+
+        let mut vm = foreplay_gdscript::GdVm::from_source(&source)
+            .map_err(|e| RpcError::internal(format!("failed compiling gdscript: {e}")))?;
+
+        let mut total_steps = 0;
+        let mut all_logs = Vec::new();
+        let mut all_signals = Vec::new();
+
+        // Call _ready first
+        if let Ok(res_ready) = vm.ready(&mut node) {
+            total_steps += res_ready.steps_executed;
+            all_logs.extend(res_ready.logs);
+        }
+
+        for _ in 0..ticks {
+            let res = vm
+                .step_physics_process(dt, &mut node)
+                .map_err(|e| RpcError::internal(format!("gdscript error: {e}")))?;
+            total_steps += res.steps_executed;
+            all_logs.extend(res.logs);
+            all_signals.extend(res.emitted_signals);
+        }
+
+        // Write updated node back to active scene
+        if let Some(target) = session.tree.active_scene.nodes.get_mut(&node_id) {
+            target.properties = node.properties.clone();
+        }
+
+        Ok(json!({
+            "success": true,
+            "steps_executed": total_steps,
+            "logs": all_logs,
+            "emitted_signals": all_signals.len(),
+            "updated_properties": node.properties
+        }))
+    }
+
+    fn handle_export_project(session: &mut HarnessSession, params: &Value) -> Result<Value, RpcError> {
+        let target_str = params
+            .get("target")
+            .and_then(|v| v.as_str())
+            .unwrap_or("LinuxSteamDeckX64");
+
+        let target = match target_str {
+            "LinuxSteamDeckX64" | "linux" | "steamdeck" => foreplay_export::ExportTarget::LinuxSteamDeckX64,
+            "WindowsX64" | "windows" | "win" => foreplay_export::ExportTarget::WindowsX64,
+            "MacOsAppBundle" | "macos" | "mac" | "app" => foreplay_export::ExportTarget::MacOsAppBundle,
+            "WebGpuBrowserUrl" | "web" | "webgpu" | "html5" => foreplay_export::ExportTarget::WebGpuBrowserUrl,
+            "SexOsPackage" | "sexos" => foreplay_export::ExportTarget::SexOsPackage,
+            other => return Err(RpcError::invalid_params(format!("unknown export target '{other}'"))),
+        };
+
+        let game_title = params
+            .get("game_title")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&session.tree.active_scene.name)
+            .to_string();
+
+        let package_name = params
+            .get("package_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("com.foreplay.game")
+            .to_string();
+
+        let scene_slug: String = session
+            .tree
+            .active_scene
+            .name
+            .chars()
+            .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+            .collect();
+        let main_scene = format!("res://scenes/{scene_slug}.fscn");
+
+        let mut config = foreplay_export::ExportConfig::new(game_title, package_name, main_scene.clone());
+        let fscn_data = session.tree.active_scene.to_fscn_string().into_bytes();
+        let clean_path = main_scene.trim_start_matches("res://");
+        config = config.with_file(clean_path, fscn_data);
+
+        let output = foreplay_export::ProjectExporter::export_project(&config, target)
+            .map_err(|e| RpcError::internal(format!("export failed: {e}")))?;
+
+        Ok(json!({
+            "success": true,
+            "target": target.display_name(),
+            "primary_artifact": output.primary_artifact,
+            "bundle_file_count": output.bundle_files.len(),
+            "archive_size": output.archive_bytes.len()
+        }))
+    }
 }
 
 fn parse_node_id_val(v: &Value) -> Option<NodeId> {
@@ -582,5 +903,195 @@ mod tests {
         let fscn_text = export_val["result"]["fscn"].as_str().unwrap();
         assert!(fscn_text.contains("[foreplay_scene name=\"SkateSpot\""));
         assert!(fscn_text.contains("Skater"));
+    }
+
+    #[test]
+    fn rpc_editor_commands_gdscript_and_export_roundtrip() {
+        let mut session = HarnessSession::new(IrScene::new("ComprehensiveRpcScene"));
+
+        // 1. Insert Node A & B
+        let insert_a = HarnessRpcServer::handle_json(
+            &mut session,
+            r#"{
+                "jsonrpc": "2.0",
+                "id": 20,
+                "method": "foreplay/insert_node",
+                "params": {
+                    "id": { "index": 1, "generation": 1 },
+                    "name": "OldName",
+                    "class_name": "CharacterBody3D",
+                    "properties": { "velocity": [0.0, 0.0, 0.0] }
+                }
+            }"#,
+        );
+        let val_a: Value = serde_json::from_str(&insert_a).unwrap();
+        assert_eq!(val_a["result"]["success"], true);
+
+        let insert_b = HarnessRpcServer::handle_json(
+            &mut session,
+            r#"{
+                "jsonrpc": "2.0",
+                "id": 21,
+                "method": "foreplay/insert_node",
+                "params": {
+                    "id": { "index": 2, "generation": 1 },
+                    "name": "ChildNode",
+                    "class_name": "Node3D"
+                }
+            }"#,
+        );
+        let val_b: Value = serde_json::from_str(&insert_b).unwrap();
+        assert_eq!(val_b["result"]["success"], true);
+
+        // 2. Rename Node 1
+        let rename_res = HarnessRpcServer::handle_json(
+            &mut session,
+            r#"{
+                "jsonrpc": "2.0",
+                "id": 22,
+                "method": "foreplay/rename_node",
+                "params": {
+                    "node_id": { "index": 1, "generation": 1 },
+                    "new_name": "SkaterRoot"
+                }
+            }"#,
+        );
+        let rename_val: Value = serde_json::from_str(&rename_res).unwrap();
+        assert_eq!(rename_val["result"]["success"], true);
+        assert_eq!(
+            session
+                .tree
+                .active_scene
+                .nodes
+                .get(&NodeId::new(1, 1).unwrap())
+                .unwrap()
+                .name,
+            "SkaterRoot"
+        );
+
+        // 3. Reparent Node 2 to Node 1
+        let reparent_res = HarnessRpcServer::handle_json(
+            &mut session,
+            r#"{
+                "jsonrpc": "2.0",
+                "id": 23,
+                "method": "foreplay/reparent_node",
+                "params": {
+                    "node_id": { "index": 2, "generation": 1 },
+                    "new_parent": { "index": 1, "generation": 1 }
+                }
+            }"#,
+        );
+        let reparent_val: Value = serde_json::from_str(&reparent_res).unwrap();
+        assert_eq!(reparent_val["result"]["success"], true);
+        assert_eq!(
+            session
+                .tree
+                .active_scene
+                .nodes
+                .get(&NodeId::new(2, 1).unwrap())
+                .unwrap()
+                .parent,
+            Some(NodeId::new(1, 1).unwrap())
+        );
+
+        // 4. Connect and Disconnect Signal
+        let conn_res = HarnessRpcServer::handle_json(
+            &mut session,
+            r#"{
+                "jsonrpc": "2.0",
+                "id": 24,
+                "method": "foreplay/connect_signal",
+                "params": {
+                    "from_node": { "index": 1, "generation": 1 },
+                    "signal_name": "ollie_popped",
+                    "to_node": { "index": 2, "generation": 1 },
+                    "method_name": "on_player_ollie"
+                }
+            }"#,
+        );
+        let conn_val: Value = serde_json::from_str(&conn_res).unwrap();
+        assert_eq!(conn_val["result"]["success"], true);
+        assert_eq!(session.tree.active_scene.connections.len(), 1);
+
+        let disconn_res = HarnessRpcServer::handle_json(
+            &mut session,
+            r#"{
+                "jsonrpc": "2.0",
+                "id": 25,
+                "method": "foreplay/disconnect_signal",
+                "params": {
+                    "from_node": { "index": 1, "generation": 1 },
+                    "signal_name": "ollie_popped",
+                    "to_node": { "index": 2, "generation": 1 },
+                    "method_name": "on_player_ollie"
+                }
+            }"#,
+        );
+        let disconn_val: Value = serde_json::from_str(&disconn_res).unwrap();
+        assert_eq!(disconn_val["result"]["success"], true);
+        assert_eq!(session.tree.active_scene.connections.len(), 0);
+
+        // 5. Set Groups
+        let groups_res = HarnessRpcServer::handle_json(
+            &mut session,
+            r#"{
+                "jsonrpc": "2.0",
+                "id": 26,
+                "method": "foreplay/set_groups",
+                "params": {
+                    "node_id": { "index": 1, "generation": 1 },
+                    "groups": ["players", "skaters"]
+                }
+            }"#,
+        );
+        let groups_val: Value = serde_json::from_str(&groups_res).unwrap();
+        assert_eq!(groups_val["result"]["success"], true);
+        assert_eq!(
+            session
+                .tree
+                .active_scene
+                .nodes
+                .get(&NodeId::new(1, 1).unwrap())
+                .unwrap()
+                .groups,
+            vec!["players", "skaters"]
+        );
+
+        // 6. Run GDScript Ticks
+        let gd_res = HarnessRpcServer::handle_json(
+            &mut session,
+            r#"{
+                "jsonrpc": "2.0",
+                "id": 27,
+                "method": "foreplay/run_gdscript_ticks",
+                "params": {
+                    "node_id": { "index": 1, "generation": 1 },
+                    "source": "extends CharacterBody3D\nvar speed = 10.0\nfunc _physics_process(delta):\n    position.x += speed * delta\n",
+                    "ticks": 5,
+                    "dt": 0.1
+                }
+            }"#,
+        );
+        let gd_val: Value = serde_json::from_str(&gd_res).unwrap();
+        assert_eq!(gd_val["result"]["success"], true);
+        assert!(gd_val["result"]["steps_executed"].as_u64().unwrap() > 0);
+
+        // 7. Export Project
+        let export_res = HarnessRpcServer::handle_json(
+            &mut session,
+            r#"{
+                "jsonrpc": "2.0",
+                "id": 28,
+                "method": "foreplay/export_project",
+                "params": {
+                    "target": "LinuxSteamDeckX64",
+                    "game_title": "TestGame"
+                }
+            }"#,
+        );
+        let export_val: Value = serde_json::from_str(&export_res).unwrap();
+        assert_eq!(export_val["result"]["success"], true);
+        assert_eq!(export_val["result"]["primary_artifact"], "game.x86_64");
     }
 }

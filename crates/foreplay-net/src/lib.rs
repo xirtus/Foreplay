@@ -235,6 +235,98 @@ impl ReplayInterpolationBuffer {
     }
 }
 
+/// Deterministic frame-indexed input ring with rollback and resimulation hooks.
+#[derive(Clone, Debug)]
+pub struct DeterministicLockstepBuffer<I> {
+    inputs: BTreeMap<u64, BTreeMap<u8, I>>,
+    confirmed_tick: u64,
+    current_tick: u64,
+    max_history: usize,
+}
+
+impl<I: Clone + fmt::Debug> DeterministicLockstepBuffer<I> {
+    /// Create a lockstep buffer with given max history ticks.
+    #[must_use]
+    pub fn new(max_history: usize) -> Self {
+        Self {
+            inputs: BTreeMap::new(),
+            confirmed_tick: 0,
+            current_tick: 0,
+            max_history: max_history.max(32),
+        }
+    }
+
+    /// Record a player's input command for a frame tick.
+    pub fn record_input(&mut self, tick: u64, player_id: u8, input: I) {
+        self.inputs.entry(tick).or_default().insert(player_id, input);
+
+        if let Some(cutoff) = self.confirmed_tick.checked_sub(self.max_history as u64) {
+            self.inputs.retain(|&t, _| t >= cutoff);
+        }
+    }
+
+    /// Read recorded input for a player at a specific tick.
+    #[must_use]
+    pub fn get_input(&self, tick: u64, player_id: u8) -> Option<&I> {
+        self.inputs.get(&tick).and_then(|m| m.get(&player_id))
+    }
+
+    /// Check if all expected players have submitted inputs for a tick.
+    #[must_use]
+    pub fn is_tick_complete(&self, tick: u64, expected_players: &[u8]) -> bool {
+        if let Some(tick_inputs) = self.inputs.get(&tick) {
+            expected_players.iter().all(|id| tick_inputs.contains_key(id))
+        } else {
+            false
+        }
+    }
+
+    /// Try to advance the confirmed tick as far as possible.
+    pub fn advance_confirmed_tick(&mut self, expected_players: &[u8]) -> Option<u64> {
+        let mut next = self.confirmed_tick + 1;
+        let mut advanced = false;
+        while self.is_tick_complete(next, expected_players) {
+            self.confirmed_tick = next;
+            next += 1;
+            advanced = true;
+        }
+        if advanced {
+            Some(self.confirmed_tick)
+        } else {
+            None
+        }
+    }
+
+    /// Check whether a received input tick is in the past relative to current speculative tick,
+    /// indicating that simulation must roll back to `received_tick`.
+    #[must_use]
+    pub const fn rollback_target(&self, received_tick: u64) -> Option<u64> {
+        if received_tick < self.current_tick {
+            Some(received_tick)
+        } else {
+            None
+        }
+    }
+
+    #[must_use]
+    pub const fn confirmed_tick(&self) -> u64 {
+        self.confirmed_tick
+    }
+
+    #[must_use]
+    pub const fn current_tick(&self) -> u64 {
+        self.current_tick
+    }
+
+    pub fn advance_current_tick(&mut self) {
+        self.current_tick += 1;
+    }
+
+    pub fn set_current_tick(&mut self, tick: u64) {
+        self.current_tick = tick;
+    }
+}
+
 /// Normalized spherical linear quaternion interpolation.
 fn slerp4(q0: [f32; 4], mut q1: [f32; 4], t: f32) -> [f32; 4] {
     let mut dot = q0[0] * q1[0] + q0[1] * q1[1] + q0[2] * q1[2] + q0[3] * q1[3];
@@ -553,5 +645,29 @@ mod tests {
         // Removing a player
         assert!(lobby.remove_player(p3));
         assert_eq!(lobby.total_players(), 2);
+    }
+
+    #[test]
+    fn deterministic_lockstep_buffer_advance_and_rollback() {
+        let mut buffer: DeterministicLockstepBuffer<String> = DeterministicLockstepBuffer::new(64);
+        buffer.set_current_tick(10);
+
+        // Record inputs for tick 1
+        buffer.record_input(1, 0, "jump".into());
+        buffer.record_input(1, 1, "crouch".into());
+
+        assert!(buffer.is_tick_complete(1, &[0, 1]));
+        assert_eq!(buffer.advance_confirmed_tick(&[0, 1]), Some(1));
+        assert_eq!(buffer.confirmed_tick(), 1);
+
+        // Tick 2 only has player 0
+        buffer.record_input(2, 0, "ollie".into());
+        assert!(!buffer.is_tick_complete(2, &[0, 1]));
+        assert_eq!(buffer.advance_confirmed_tick(&[0, 1]), None);
+
+        // Late packet for tick 5 while current speculative tick is 10
+        assert_eq!(buffer.rollback_target(5), Some(5));
+        // Future packet does not trigger rollback
+        assert_eq!(buffer.rollback_target(12), None);
     }
 }

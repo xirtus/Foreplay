@@ -15,6 +15,11 @@ foreplay-net = { path = "../foreplay-net" }
 foreplay-gdscript = { path = "../foreplay-gdscript" }
 foreplay-harness = { path = "../foreplay-harness" }
 foreplay-porthost = { path = "../foreplay-porthost" }
+foreplay-render = { path = "../foreplay-render" }
+foreplay-audio = { path = "../foreplay-audio" }
+foreplay-platform = { path = "../foreplay-platform" }
+foreplay-export = { path = "../foreplay-export" }
+foreplay-script = { path = "../foreplay-script" }
 bevy_ecs = { workspace = true }
 proptest = { workspace = true }
 serde_json = { workspace = true }

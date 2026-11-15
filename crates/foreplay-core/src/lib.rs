@@ -7,6 +7,14 @@
 //! - Godot `Signal` (`emit_signal` / `connect`) -> Bevy **Entity Observers & Triggers**
 //! - Godot `ClassDB` / `@export` -> `bevy_reflect::Reflect` + `foreplay_ir::FeelSpecKnob`
 
+pub mod animation;
+pub mod navigation;
+pub mod ui_layout;
+
+pub use animation::*;
+pub use navigation::*;
+pub use ui_layout::*;
+
 use bevy_ecs::hierarchy::ChildOf;
 use bevy_ecs::prelude::*;
 use bevy_math::{Quat, Vec3};
@@ -772,5 +780,205 @@ mod tests {
         assert_eq!(tree.tick_count, 0);
         assert_eq!(tree.active_scene.name, "PietSnapshotTest");
         assert!(tree.ir_to_entity.contains_key(&node_id));
+    }
+
+    #[test]
+    fn animation_player_interpolation_looping_and_evaluation() {
+        let mut scene = IrScene::new("AnimScene");
+        let skater_id = NodeId::new(1, 1).unwrap();
+        scene.nodes.insert(
+            skater_id,
+            IrNode {
+                id: skater_id,
+                name: "Skater".into(),
+                class_name: "CharacterBody3D".into(),
+                parent: None,
+                instance_scene: None,
+                properties: BTreeMap::new(),
+                groups: vec![],
+            },
+        );
+
+        let mut clip = AnimationClip::new("OllieJump", 1.0).with_loop(LoopMode::None);
+        clip.add_track(AnimationTrack::Position3DTrack {
+            node_path: "Skater".into(),
+            keyframes: vec![
+                Keyframe::new(0.0, [0.0, 0.0, 0.0]),
+                Keyframe::new(0.5, [0.0, 2.0, 0.0]),
+                Keyframe::new(1.0, [0.0, 0.0, 0.0]),
+            ],
+            interpolation: InterpolationMode::Linear,
+        });
+        clip.add_track(AnimationTrack::MethodCallTrack {
+            node_path: "Skater".into(),
+            keyframes: vec![MethodKeyframe::new(0.5, "pop_particles", vec![IrValue::I64(10)])],
+        });
+
+        let mut player = AnimationPlayer::new();
+        player.add_clip(clip);
+        assert!(player.play("OllieJump"));
+
+        // Step 0.5s: peak of jump
+        let (finished, methods) = player.evaluate_into_scene(&mut scene, 0.5);
+        assert!(!finished);
+        assert_eq!(methods.len(), 1);
+        assert_eq!(methods[0].1, "pop_particles");
+
+        let skater = &scene.nodes[&skater_id];
+        assert_eq!(
+            skater.properties.get("translation"),
+            Some(&IrValue::Vec3([0.0, 2.0, 0.0]))
+        );
+
+        // Step another 0.5s: land jump and finish
+        let (finished, _) = player.evaluate_into_scene(&mut scene, 0.5);
+        assert!(finished);
+        let skater = &scene.nodes[&skater_id];
+        assert_eq!(
+            skater.properties.get("translation"),
+            Some(&IrValue::Vec3([0.0, 0.0, 0.0]))
+        );
+    }
+
+    #[test]
+    fn animation_tree_bfs_travel_and_blendspace2d() {
+        // Test state machine BFS travel
+        let mut sm = AnimationNodeStateMachine::new();
+        sm.add_state("Idle", "idle_clip");
+        sm.add_state("Pushing", "push_clip");
+        sm.add_state("Ollie", "ollie_clip");
+        sm.add_state("Grind", "grind_clip");
+
+        sm.add_transition(StateTransition::new("Idle", "Pushing", 0.2));
+        sm.add_transition(StateTransition::new("Pushing", "Ollie", 0.1));
+        sm.add_transition(StateTransition::new("Ollie", "Grind", 0.1));
+
+        let path = sm.travel("Grind").expect("path to Grind");
+        assert_eq!(path, vec!["Idle", "Pushing", "Ollie", "Grind"]);
+        assert_eq!(sm.current_state, "Grind");
+
+        // Test BlendSpace2D normalized weights
+        let mut bs2d = BlendSpace2D::new();
+        bs2d.add_point([0.0, 0.0], "idle");
+        bs2d.add_point([0.0, 1.0], "run_fwd");
+        bs2d.add_point([0.0, -1.0], "run_bwd");
+        bs2d.add_point([1.0, 0.0], "strafe_right");
+        bs2d.add_point([-1.0, 0.0], "strafe_left");
+
+        // Exact match
+        let exact = bs2d.sample([0.0, 1.0]);
+        assert_eq!(exact, vec![("run_fwd".to_string(), 1.0)]);
+
+        // Intermediate sample: weights must sum to 1.0
+        let blended = bs2d.sample([0.5, 0.5]);
+        let total_weight: f32 = blended.iter().map(|(_, w)| *w).sum();
+        assert!((total_weight - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn ui_control_layout_solver_hbox_vbox_grid_margin_center() {
+        let viewport = ControlRect::new(0.0, 0.0, 800.0, 600.0);
+
+        // 1. FullRect anchor preset
+        let root_id = NodeId::new(0, 1).unwrap();
+        let mut root = ControlLayoutNode::new(root_id, ContainerKind::Control)
+            .with_preset(AnchorPreset::FullRect);
+
+        // 2. MarginContainer
+        let margin_id = NodeId::new(1, 1).unwrap();
+        let mut margin_container = ControlLayoutNode::new(
+            margin_id,
+            ContainerKind::MarginContainer {
+                margins: [10.0, 20.0, 10.0, 20.0],
+            },
+        )
+        .with_preset(AnchorPreset::FullRect);
+
+        // 3. HBoxContainer with two children
+        let hbox_id = NodeId::new(2, 1).unwrap();
+        let mut hbox = ControlLayoutNode::new(
+            hbox_id,
+            ContainerKind::HBoxContainer { separation: 10.0 },
+        )
+        .with_preset(AnchorPreset::FullRect);
+
+        let child1_id = NodeId::new(3, 1).unwrap();
+        let child1 = ControlLayoutNode::new(child1_id, ContainerKind::Control)
+            .with_min_size(100.0, 50.0)
+            .with_size_flags(SizeFlags::fill(), SizeFlags::fill());
+
+        let child2_id = NodeId::new(4, 1).unwrap();
+        let child2 = ControlLayoutNode::new(child2_id, ContainerKind::Control)
+            .with_min_size(100.0, 50.0)
+            .with_size_flags(SizeFlags::expand_fill(), SizeFlags::fill());
+
+        hbox.add_child(child1);
+        hbox.add_child(child2);
+        margin_container.add_child(hbox);
+        root.add_child(margin_container);
+
+        let layout = solve_control_hierarchy(viewport, &root);
+
+        let root_rect = layout[&root_id];
+        assert_eq!(root_rect, ControlRect::new(0.0, 0.0, 800.0, 600.0));
+
+        let margin_rect = layout[&margin_id];
+        assert_eq!(margin_rect, ControlRect::new(0.0, 0.0, 800.0, 600.0));
+
+        // HBox inside MarginContainer: x = 10, y = 20, width = 780, height = 560
+        let hbox_rect = layout[&hbox_id];
+        assert_eq!(hbox_rect, ControlRect::new(10.0, 20.0, 780.0, 560.0));
+
+        // Child 1 has min_size 100, no expand
+        let c1_rect = layout[&child1_id];
+        assert_eq!(c1_rect.x, 10.0);
+        assert_eq!(c1_rect.width, 100.0);
+
+        // Child 2 expands into remaining width: (780 - 10 separation - 100 c1_width) = 670
+        let c2_rect = layout[&child2_id];
+        assert_eq!(c2_rect.x, 10.0 + 100.0 + 10.0);
+        assert_eq!(c2_rect.width, 670.0);
+    }
+
+    #[test]
+    fn navigation_servers_2d_and_3d_pathfinding() {
+        // 2D AStarGrid
+        let mut grid = AStarGrid2D::new([0, 0], [10, 10], [1.0, 1.0]);
+        // Block obstacle wall at x = 5, y = 0..8 (leaving a gap at y = 9)
+        for y in 0..8 {
+            grid.set_point_solid([5, y], true);
+        }
+
+        let path_2d = grid.find_path([0, 0], [10, 0]).expect("path around wall");
+        assert!(path_2d.len() > 10);
+        assert_eq!(*path_2d.first().unwrap(), [0, 0]);
+        assert_eq!(*path_2d.last().unwrap(), [10, 0]);
+
+        // Autotile bitmask lookup
+        assert_eq!(TileMapLayer::autotile_lookup(0b1111), [3, 3]); // full cross
+        assert_eq!(TileMapLayer::autotile_lookup(0b0000), [0, 0]); // isolated
+
+        // 3D NavMesh
+        let mut navmesh = NavMesh3D::new();
+        // Poly 0: x: 0..5, z: 0..5 (y=0)
+        navmesh.add_polygon(vec![
+            [0.0, 0.0, 0.0],
+            [5.0, 0.0, 0.0],
+            [5.0, 0.0, 5.0],
+            [0.0, 0.0, 5.0],
+        ]);
+        // Poly 1: x: 5..10, z: 0..5 (shares edge [5,0,0] to [5,0,5] with Poly 0)
+        navmesh.add_polygon(vec![
+            [5.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [10.0, 0.0, 5.0],
+            [5.0, 0.0, 5.0],
+        ]);
+
+        let path_3d = navmesh
+            .find_path([1.0, 0.0, 1.0], [9.0, 0.0, 4.0])
+            .expect("3D navmesh path");
+        assert_eq!(*path_3d.first().unwrap(), [1.0, 0.0, 1.0]);
+        assert_eq!(*path_3d.last().unwrap(), [9.0, 0.0, 4.0]);
     }
 }

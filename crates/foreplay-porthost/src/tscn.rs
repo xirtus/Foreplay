@@ -345,6 +345,206 @@ pub fn parse_tscn_to_ir(source: &str) -> Result<IrScene, TscnParseError> {
     Ok(scene)
 }
 
+/// Exports a canonical `IrScene` to Godot 4 `.tscn` text format.
+///
+/// Produces deterministic, sorted output suitable for Git version control and Godot editor opening.
+pub fn export_ir_to_tscn(scene: &IrScene) -> String {
+    let mut out = format!("[gd_scene format=3 uid=\"uid://foreplay_{}\"]\n", scene.name);
+
+    // Collect external resources (instanced packed scenes)
+    let mut ext_map = BTreeMap::new();
+    let mut ext_counter = 1usize;
+    for node in scene.nodes.values() {
+        if let Some(inst) = &node.instance_scene
+            && !ext_map.contains_key(inst)
+        {
+            let id = format!("{}_inst", ext_counter);
+            ext_counter += 1;
+            ext_map.insert(inst.clone(), id);
+        }
+    }
+
+    for (path, id) in &ext_map {
+        out.push_str(&format!("\n[ext_resource type=\"PackedScene\" path=\"{}\" id=\"{}\"]\n", path, id));
+    }
+
+    // Determine root node
+    let root = scene.nodes.values().find(|n| n.parent.is_none());
+    let root_id = root.map(|r| r.id);
+
+    // Build hierarchy paths for all nodes
+    let mut node_paths: BTreeMap<NodeId, String> = BTreeMap::new();
+    if let Some(r) = root {
+        node_paths.insert(r.id, ".".to_string());
+    }
+
+    let mut unresolved: Vec<&IrNode> = scene.nodes.values().collect();
+    unresolved.sort_by_key(|n| n.id.index);
+
+    let mut iterations = 0;
+    while !unresolved.is_empty() && iterations < 50 {
+        iterations += 1;
+        let mut progress = false;
+        let mut next_unresolved = Vec::new();
+
+        for node in unresolved {
+            if let Some(parent_id) = node.parent {
+                if let Some(parent_path) = node_paths.get(&parent_id) {
+                    let path = if parent_path == "." {
+                        node.name.clone()
+                    } else {
+                        format!("{}/{}", parent_path, node.name)
+                    };
+                    node_paths.insert(node.id, path);
+                    progress = true;
+                } else {
+                    next_unresolved.push(node);
+                }
+            } else {
+                node_paths.insert(node.id, ".".to_string());
+                progress = true;
+            }
+        }
+
+        if !progress {
+            for node in next_unresolved {
+                node_paths.insert(node.id, node.name.clone());
+            }
+            break;
+        }
+        unresolved = next_unresolved;
+    }
+
+    // Emit nodes in deterministic order (root first, then sorted by path)
+    let mut sorted_nodes: Vec<&IrNode> = scene.nodes.values().collect();
+    sorted_nodes.sort_by(|a, b| {
+        let is_a_root = a.parent.is_none();
+        let is_b_root = b.parent.is_none();
+        if is_a_root && !is_b_root {
+            std::cmp::Ordering::Less
+        } else if !is_a_root && is_b_root {
+            std::cmp::Ordering::Greater
+        } else {
+            let path_a = node_paths.get(&a.id).cloned().unwrap_or_default();
+            let path_b = node_paths.get(&b.id).cloned().unwrap_or_default();
+            path_a.cmp(&path_b)
+        }
+    });
+
+    for node in sorted_nodes {
+        out.push('\n');
+        out.push_str(&format!("[node name=\"{}\" type=\"{}\"", node.name, node.class_name));
+
+        if let Some(parent_id) = node.parent {
+            if Some(parent_id) == root_id {
+                out.push_str(" parent=\".\"");
+            } else if let Some(parent_path) = node_paths.get(&parent_id) {
+                out.push_str(&format!(" parent=\"{}\"", parent_path));
+            }
+        }
+
+        if let Some(inst) = &node.instance_scene
+            && let Some(id) = ext_map.get(inst)
+        {
+            out.push_str(&format!(" instance=ExtResource(\"{}\")", id));
+        }
+
+        if !node.groups.is_empty() {
+            let groups_str = node
+                .groups
+                .iter()
+                .map(|g| format!("\"{}\"", g))
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push_str(&format!(" groups=[{}]", groups_str));
+        }
+
+        out.push_str("]\n");
+
+        for (k, v) in &node.properties {
+            out.push_str(&format!("{} = {}\n", k, format_godot_value(v)));
+        }
+    }
+
+    // Emit connections
+    for conn in &scene.connections {
+        let from_str = if Some(conn.from_node) == root_id {
+            ".".to_string()
+        } else {
+            node_paths.get(&conn.from_node).cloned().unwrap_or_else(|| ".".into())
+        };
+
+        let to_str = if Some(conn.to_node) == root_id {
+            ".".to_string()
+        } else {
+            node_paths.get(&conn.to_node).cloned().unwrap_or_else(|| ".".into())
+        };
+
+        out.push_str(&format!(
+            "\n[connection signal=\"{}\" from=\"{}\" to=\"{}\" method=\"{}\"]\n",
+            conn.signal_name, from_str, to_str, conn.method_name
+        ));
+    }
+
+    out
+}
+
+fn format_godot_value(val: &IrValue) -> String {
+    match val {
+        IrValue::Nil => "null".to_string(),
+        IrValue::Bool(b) => if *b { "true".to_string() } else { "false".to_string() },
+        IrValue::I64(i) => format!("{i}"),
+        IrValue::F64(f) => {
+            if f.fract() == 0.0 {
+                format!("{f:.1}")
+            } else {
+                format!("{f}")
+            }
+        }
+        IrValue::String(s) => format!("\"{}\"", escape_godot_string(s)),
+        IrValue::Vec2([x, y]) => format!("Vector2({x}, {y})"),
+        IrValue::Vec3([x, y, z]) => format!("Vector3({x}, {y}, {z})"),
+        IrValue::Quat([x, y, z, w]) => format!("Quaternion({x}, {y}, {z}, {w})"),
+        IrValue::Color([r, g, b, a]) => format!("Color({r}, {g}, {b}, {a})"),
+        IrValue::NodePath(p) => format!("NodePath(\"{p}\")"),
+        IrValue::ResourcePath(p) => {
+            if let Some(id) = p.strip_prefix("sub://") {
+                format!("SubResource(\"{id}\")")
+            } else {
+                format!("ExtResource(\"{p}\")")
+            }
+        }
+        IrValue::Array(arr) => {
+            let inner = arr.iter().map(format_godot_value).collect::<Vec<_>>().join(", ");
+            format!("[{inner}]")
+        }
+        IrValue::Map(map) => {
+            let inner = map
+                .iter()
+                .map(|(k, v)| format!("\"{}\": {}", escape_godot_string(k), format_godot_value(v)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{{{inner}}}")
+        }
+    }
+}
+
+fn escape_godot_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+
 #[derive(Debug)]
 struct RawNode {
     name: String,
@@ -822,6 +1022,24 @@ position = Vector3(5, 0, 0)
 
         assert_eq!(ir.connections.len(), 1);
         assert_eq!(ir.connections[0].signal_name, "trick_landed");
+    }
+
+    #[test]
+    fn export_ir_to_tscn_bidirectional_roundtrip() {
+        let tscn_src = include_str!("../../../templates/godot-migration/skate_spot.tscn");
+        let ir = parse_tscn_to_ir(tscn_src).expect("initial parse must succeed");
+
+        let exported_tscn = export_ir_to_tscn(&ir);
+        assert!(exported_tscn.contains("[gd_scene format=3"));
+        assert!(exported_tscn.contains("[node name=\"SkateSpot\" type=\"Node3D\"]"));
+        assert!(exported_tscn.contains("[node name=\"Skater\" type=\"CharacterBody3D\""));
+        assert!(exported_tscn.contains("groups=[\"players\", \"skaters\"]"));
+
+        // Parse back exported TSCN
+        let roundtrip_ir = parse_tscn_to_ir(&exported_tscn).expect("parse of exported tscn must succeed");
+        assert_eq!(roundtrip_ir.name, ir.name);
+        assert_eq!(roundtrip_ir.nodes.len(), ir.nodes.len());
+        assert_eq!(roundtrip_ir.connections.len(), ir.connections.len());
     }
 }
 

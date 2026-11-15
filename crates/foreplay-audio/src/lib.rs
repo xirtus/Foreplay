@@ -1,8 +1,20 @@
-//! `AudioServer` bus hierarchy, metering, dB/linear conversions,
-//! clean-room WAV/PCM parser, and pluggable codec registry (Vorbis, Opus, ported XMA).
+pub mod effects;
+pub use effects::{
+    AudioEffect, AudioEffectChorus, AudioEffectEq3Band, AudioEffectLimiter, AudioEffectLowPassFilter,
+    AudioEffectReverb,
+};
 
 use std::collections::BTreeMap;
 use std::fmt;
+
+/// Real-time stereo VU peak and RMS metering results for an audio bus.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct BusVuMeter {
+    pub peak_left_db: f32,
+    pub peak_right_db: f32,
+    pub rms_left_db: f32,
+    pub rms_right_db: f32,
+}
 
 /// Pluggable audio decoder contract for standard formats and `rustports` codecs (e.g., XMA).
 pub trait AudioStreamDecoder: Send + Sync + fmt::Debug {
@@ -78,12 +90,13 @@ impl AudioBus {
     }
 }
 
-/// Central audio server managing buses, routing, metering, and codec decoders.
+/// Central audio server managing buses, routing, metering, DSP effects, and codec decoders.
 #[derive(Debug)]
 pub struct AudioServer {
     /// Preserved Phase 0 field: master volume in dB.
     pub master_volume_db: f32,
     buses: BTreeMap<AudioBusKind, AudioBus>,
+    bus_effects: BTreeMap<AudioBusKind, Vec<Box<dyn AudioEffect>>>,
     codecs: CodecRegistry,
 }
 
@@ -103,10 +116,83 @@ impl AudioServer {
         buses.insert(AudioBusKind::Sfx, AudioBus::new(AudioBusKind::Sfx, Some(AudioBusKind::Master)));
         buses.insert(AudioBusKind::Voice, AudioBus::new(AudioBusKind::Voice, Some(AudioBusKind::Master)));
 
+        let mut bus_effects = BTreeMap::new();
+        bus_effects.insert(AudioBusKind::Master, Vec::new());
+        bus_effects.insert(AudioBusKind::Music, Vec::new());
+        bus_effects.insert(AudioBusKind::Sfx, Vec::new());
+        bus_effects.insert(AudioBusKind::Voice, Vec::new());
+
         Self {
             master_volume_db: 0.0,
             buses,
+            bus_effects,
             codecs: CodecRegistry::new(),
+        }
+    }
+
+    /// Add a DSP effect to an audio bus.
+    pub fn add_bus_effect(&mut self, kind: AudioBusKind, effect: Box<dyn AudioEffect>) {
+        self.bus_effects.entry(kind).or_default().push(effect);
+    }
+
+    /// Remove a DSP effect from an audio bus by index.
+    pub fn remove_bus_effect(&mut self, kind: AudioBusKind, index: usize) -> bool {
+        match self.bus_effects.get_mut(&kind) {
+            Some(effects) if index < effects.len() => {
+                effects.remove(index);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Process audio frames through bus DSP effects, apply gain, and calculate real-time stereo VU meter.
+    pub fn process_bus_frames(&mut self, kind: AudioBusKind, frames: &mut [[f32; 2]]) -> BusVuMeter {
+        let gain = self.effective_bus_gain(kind);
+        let mut effects = self.bus_effects.get_mut(&kind);
+
+        let mut max_l = 0.0_f32;
+        let mut max_r = 0.0_f32;
+        let mut sum_sq_l = 0.0_f32;
+        let mut sum_sq_r = 0.0_f32;
+
+        for frame in frames.iter_mut() {
+            let mut l = frame[0];
+            let mut r = frame[1];
+
+            if let Some(effect_list) = &mut effects {
+                for eff in effect_list.iter_mut() {
+                    let (el, er) = eff.process_stereo(l, r);
+                    l = el;
+                    r = er;
+                }
+            }
+
+            l *= gain;
+            r *= gain;
+
+            frame[0] = l;
+            frame[1] = r;
+
+            let abs_l = l.abs();
+            let abs_r = r.abs();
+            if abs_l > max_l { max_l = abs_l; }
+            if abs_r > max_r { max_r = abs_r; }
+            sum_sq_l += l * l;
+            sum_sq_r += r * r;
+        }
+
+        let n = frames.len().max(1) as f32;
+        let rms_l = (sum_sq_l / n).sqrt();
+        let rms_r = (sum_sq_r / n).sqrt();
+
+        self.update_bus_metering(kind, max_l, max_r);
+
+        BusVuMeter {
+            peak_left_db: linear_to_db(max_l),
+            peak_right_db: linear_to_db(max_r),
+            rms_left_db: linear_to_db(rms_l),
+            rms_right_db: linear_to_db(rms_r),
         }
     }
 
@@ -523,5 +609,35 @@ mod tests {
         assert_eq!(dec.format_name(), "XMA2");
         assert_eq!(dec.channels(), 6);
         assert_eq!(dec.sample_rate(), 48000);
+    }
+
+    #[test]
+    fn dsp_effects_processing_and_limiter() {
+        let mut limiter = AudioEffectLimiter::new(-6.0); // -6 dB threshold (~0.5 linear)
+        // High amplitude input
+        let mut out_l = 0.0;
+        let mut out_r = 0.0;
+        for _ in 0..100 {
+            let (l, r) = limiter.process_stereo(2.0, -2.0);
+            out_l = l;
+            out_r = r;
+        }
+
+        // Limiter must have clamped signal below ceiling
+        assert!(out_l <= 0.6);
+        assert!(out_r.abs() <= 0.6);
+    }
+
+    #[test]
+    fn bus_dsp_frames_processing_and_vu_metering() {
+        let mut server = AudioServer::new();
+        server.add_bus_effect(AudioBusKind::Sfx, Box::new(AudioEffectLimiter::new(0.0)));
+
+        let mut frames = vec![[0.8, 0.6]; 128];
+        let vu = server.process_bus_frames(AudioBusKind::Sfx, &mut frames);
+
+        assert!(vu.peak_left_db <= 0.1);
+        assert!(vu.peak_right_db <= 0.1);
+        assert!(vu.rms_left_db > -10.0);
     }
 }

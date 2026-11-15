@@ -13,6 +13,7 @@ members = [
     "crates/foreplay-atlas",
     "crates/foreplay-harness",
     "crates/foreplay-porthost",
+    "crates/foreplay-export",
     "crates/foreplay-editor",
     "crates/foreplay-verifier",
 ]

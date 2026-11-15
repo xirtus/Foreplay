@@ -1,5 +1,10 @@
-//! `RenderingServer` RID arenas, 3D camera math, gizmo draw list,
-//! and deterministic SexOS/CI software wireframe rasterizer.
+pub mod benchmark;
+pub mod pipeline;
+pub mod shader;
+
+pub use benchmark::{run_10k_entity_render_benchmark, DrawCommand, RenderBenchmarkReceipt};
+pub use pipeline::{cull_aabbs_frustum, EmissionShape, Frustum, GpuParticles3DSim, Particle3D, Plane, ViewportDebugDraw};
+pub use shader::{compile_gdshader_to_wgsl, ShaderCompileError, ShaderType, ShaderUniform, UniformHint, UniformType, VisualShaderGraph, VisualShaderNode};
 
 use std::collections::BTreeMap;
 use bevy_math::{Mat4, Quat, Vec2, Vec3, Vec4};
@@ -409,6 +414,7 @@ struct ViewportData {
     height: u32,
     clear_color: [u8; 4],
     camera: Option<Camera3DRid>,
+    debug_draw: ViewportDebugDraw,
 }
 
 /// FNV-1a 64-bit deterministic golden-frame hash helper.
@@ -475,9 +481,23 @@ impl RenderingServer {
                 height: 720,
                 clear_color: [20, 24, 32, 255],
                 camera: None,
+                debug_draw: ViewportDebugDraw::LitPbr,
             },
         );
         rid
+    }
+
+    /// Set viewport debug draw visualization mode.
+    pub fn set_viewport_debug_draw(&mut self, viewport: ViewportRid, mode: ViewportDebugDraw) {
+        if let Some(vp) = self.viewports.get_mut(&viewport.raw) {
+            vp.debug_draw = mode;
+        }
+    }
+
+    /// Get viewport debug draw mode.
+    #[must_use]
+    pub fn get_viewport_debug_draw(&self, viewport: ViewportRid) -> ViewportDebugDraw {
+        self.viewports.get(&viewport.raw).map(|v| v.debug_draw).unwrap_or_default()
     }
 
     /// Update viewport render resolution.
@@ -756,5 +776,88 @@ mod tests {
         assert!(hit.x.abs() < 1e-3);
         assert!(hit.y.abs() < 1e-4);
         assert!(hit.z.abs() < 1e-3);
+    }
+
+    #[test]
+    fn gdshader_to_wgsl_compilation() {
+        let shader_src = r#"
+shader_type spatial;
+render_mode cull_back, unshaded;
+
+uniform vec4 albedo_color : source_color = vec4(1.0, 0.5, 0.2, 1.0);
+uniform float roughness : hint_range(0.0, 1.0) = 0.5;
+uniform sampler2D main_tex : hint_default_white;
+
+void fragment() {
+    vec4 tex = texture(main_tex, UV);
+    ALBEDO = albedo_color.rgb * tex.rgb;
+    ROUGHNESS = roughness;
+}
+"#;
+        let wgsl = compile_gdshader_to_wgsl(shader_src).expect("must compile valid wgsl");
+        assert!(wgsl.contains("struct MaterialUniforms"));
+        assert!(wgsl.contains("albedo_color: vec4<f32>"));
+        assert!(wgsl.contains("roughness: f32"));
+        assert!(wgsl.contains("var main_tex_texture: texture_2d<f32>"));
+        assert!(wgsl.contains("@fragment"));
+        assert!(wgsl.contains("textureSample(main_tex_texture, main_tex_sampler, UV)"));
+    }
+
+    #[test]
+    fn visual_shader_graph_wgsl_compilation() {
+        let mut graph = VisualShaderGraph::new(ShaderType::Spatial);
+        let col_node = graph.add_node(VisualShaderNode::ColorConstant([1.0, 0.0, 0.0, 1.0]));
+        // Connect color node to OutputSpatial albedo port (0)
+        graph.connect_ports((col_node, 0), (0, 0));
+
+        let wgsl = graph.compile_wgsl().expect("visual shader compiles to wgsl");
+        assert!(wgsl.contains("ALBEDO"));
+        assert!(wgsl.contains("@fragment"));
+    }
+
+    #[test]
+    fn frustum_extraction_and_aabb_culling() {
+        let cam_pos = Vec3::new(0.0, 0.0, 10.0);
+        let mut cam = PerspectiveCamera3D::new(cam_pos, 60.0, 1.0);
+        cam.look_at(Vec3::ZERO, Vec3::Y);
+        let frustum = Frustum::from_view_projection(&cam.view_projection_matrix());
+
+        // Inside frustum: box centered at origin
+        assert!(frustum.intersects_aabb(Vec3::splat(-1.0), Vec3::splat(1.0)));
+
+        // Outside frustum: box behind camera
+        assert!(!frustum.intersects_aabb(Vec3::new(-1.0, -1.0, 15.0), Vec3::new(1.0, 1.0, 20.0)));
+
+        // Batch culling
+        let aabbs_min = vec![Vec3::splat(-1.0), Vec3::new(-1.0, -1.0, 15.0)];
+        let aabbs_max = vec![Vec3::splat(1.0), Vec3::new(1.0, 1.0, 20.0)];
+        let mut visible = Vec::new();
+        cull_aabbs_frustum(&frustum, &aabbs_min, &aabbs_max, &mut visible);
+        assert_eq!(visible, vec![0]);
+    }
+
+    #[test]
+    fn gpu_particles_3d_simulation() {
+        let mut emitter = GpuParticles3DSim::new(100);
+        emitter.emission_rate = 50.0;
+        emitter.lifetime = 1.0;
+        assert_eq!(emitter.active_count(), 0);
+
+        emitter.step(0.1);
+        assert!(emitter.active_count() > 0);
+
+        // Advance past lifetime
+        emitter.emission_rate = 0.0;
+        emitter.step(1.5);
+        assert_eq!(emitter.active_count(), 0);
+    }
+
+    #[test]
+    fn phase_3_10k_entity_render_benchmark_exit_gate() {
+        let receipt = run_10k_entity_render_benchmark(10_000);
+        assert_eq!(receipt.total_entities, 10_000);
+        assert!(receipt.visible_entities > 0);
+        assert!(receipt.zero_alloc_steady_state, "must have zero heap allocations in steady-state loop");
+        assert!(receipt.meets_120_fps_gate, "frame time {}ms must be <8.33ms (>120 FPS)", receipt.frame_time_ms);
     }
 }

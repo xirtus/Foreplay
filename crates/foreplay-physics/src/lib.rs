@@ -1,9 +1,16 @@
 //! Hotswappable `PhysicsServer3D` supporting live A/B switching
-//! (e.g. Standard rigid dynamics vs. Skate 2/3 arcade board physics).
+//! (e.g. Standard rigid dynamics vs. Skate 2/3 arcade board physics)
+//! plus Godot 4 `CharacterBody3D::move_and_slide`, 2D physics server, raycasts,
+//! Area3D triggers, and 3D constraints.
 
+pub mod server_2d;
+
+use std::collections::BTreeSet;
 use std::sync::{Arc, RwLock};
 use bevy_math::Vec3;
 use foreplay_ir::{NodeId, PhysicsBackend};
+
+pub use server_2d::{CharacterBody2D, Collider2D, PhysicsBody2D, PhysicsServer2D, RayHit2D, StaticRect2D};
 
 /// 3D collision shape for broad-phase and narrow-phase queries.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -43,6 +50,8 @@ pub struct PhysicsBody3D {
     pub grounded: bool,
     pub collider: Collider3D,
     pub angular_velocity: Vec3,
+    pub collision_layer: u32,
+    pub collision_mask: u32,
 }
 
 impl PhysicsBody3D {
@@ -58,6 +67,8 @@ impl PhysicsBody3D {
             grounded: false,
             collider,
             angular_velocity: Vec3::ZERO,
+            collision_layer: 1,
+            collision_mask: 1,
         }
     }
 
@@ -81,6 +92,14 @@ impl PhysicsBody3D {
 pub struct StaticAabb {
     pub min: Vec3,
     pub max: Vec3,
+    pub collision_layer: u32,
+}
+
+impl StaticAabb {
+    #[must_use]
+    pub const fn new(min: Vec3, max: Vec3) -> Self {
+        Self { min, max, collision_layer: 1 }
+    }
 }
 
 /// Grind rail geometry for skate arcade physics.
@@ -91,13 +110,86 @@ pub struct GrindRail {
     pub radius: f32,
 }
 
+/// Result of a 3D raycast query.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct RayHit3D {
+    pub body_id: Option<NodeId>,
+    pub point: Vec3,
+    pub normal: Vec3,
+    pub distance: f32,
+}
+
+/// 3D Area trigger detecting body entries and exits.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Area3D {
+    pub id: NodeId,
+    pub position: Vec3,
+    pub collider: Collider3D,
+    pub collision_mask: u32,
+    pub overlapping_bodies: BTreeSet<NodeId>,
+}
+
+impl Area3D {
+    #[must_use]
+    pub fn new(id: NodeId, position: Vec3, collider: Collider3D) -> Self {
+        Self {
+            id,
+            position,
+            collider,
+            collision_mask: 1,
+            overlapping_bodies: BTreeSet::new(),
+        }
+    }
+}
+
+/// Events emitted when a body enters or exits an `Area3D`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AreaEvent {
+    BodyEntered { area_id: NodeId, body_id: NodeId },
+    BodyExited { area_id: NodeId, body_id: NodeId },
+}
+
+/// Elastic spring joint constraint between two bodies.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct SpringJoint3D {
+    pub body_a: NodeId,
+    pub body_b: NodeId,
+    pub rest_length: f32,
+    pub stiffness: f32,
+    pub damping: f32,
+}
+
+/// Inelastic distance constraint holding two bodies within min/max distance.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct DistanceJoint3D {
+    pub body_a: NodeId,
+    pub body_b: NodeId,
+    pub min_distance: f32,
+    pub max_distance: f32,
+}
+
+/// Rotational hinge constraint around an axis.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct HingeJoint3D {
+    pub body_a: NodeId,
+    pub body_b: NodeId,
+    pub anchor: Vec3,
+    pub axis: Vec3,
+    pub min_limit_rad: f32,
+    pub max_limit_rad: f32,
+}
+
 /// Comprehensive physical world snapshot used for serialization,
-/// state extraction/injection, and mid-frame live backend hotswapping.
+/// state extraction/injection, raycasting, and mid-frame live backend hotswapping.
 #[derive(Clone, PartialEq, Debug)]
 pub struct PhysicsWorldState {
     pub bodies: Vec<PhysicsBody3D>,
     pub static_aabbs: Vec<StaticAabb>,
     pub grind_rails: Vec<GrindRail>,
+    pub areas: Vec<Area3D>,
+    pub spring_joints: Vec<SpringJoint3D>,
+    pub distance_joints: Vec<DistanceJoint3D>,
+    pub hinge_joints: Vec<HingeJoint3D>,
     pub gravity: Vec3,
     pub time_elapsed: f32,
 }
@@ -116,6 +208,10 @@ impl PhysicsWorldState {
             bodies: Vec::new(),
             static_aabbs: Vec::new(),
             grind_rails: Vec::new(),
+            areas: Vec::new(),
+            spring_joints: Vec::new(),
+            distance_joints: Vec::new(),
+            hinge_joints: Vec::new(),
             gravity: Vec3::new(0.0, -9.81, 0.0),
             time_elapsed: 0.0,
         }
@@ -140,12 +236,430 @@ impl PhysicsWorldState {
 
     /// Add a static obstacle AABB box.
     pub fn add_static_aabb(&mut self, min: Vec3, max: Vec3) {
-        self.static_aabbs.push(StaticAabb { min, max });
+        self.static_aabbs.push(StaticAabb { min, max, collision_layer: 1 });
+    }
+
+    /// Add a static obstacle AABB box with explicit collision layer bitmask.
+    pub fn add_static_aabb_with_layer(&mut self, min: Vec3, max: Vec3, layer: u32) {
+        self.static_aabbs.push(StaticAabb { min, max, collision_layer: layer });
     }
 
     /// Add a grind rail segment.
     pub fn add_grind_rail(&mut self, start: Vec3, end: Vec3, radius: f32) {
         self.grind_rails.push(GrindRail { start, end, radius });
+    }
+
+    /// Add an Area3D trigger volume.
+    pub fn add_area(&mut self, area: Area3D) {
+        self.areas.retain(|a| a.id != area.id);
+        self.areas.push(area);
+    }
+
+    /// Add a spring joint constraint.
+    pub fn add_spring_joint(&mut self, joint: SpringJoint3D) {
+        self.spring_joints.push(joint);
+    }
+
+    /// Add a distance joint constraint.
+    pub fn add_distance_joint(&mut self, joint: DistanceJoint3D) {
+        self.distance_joints.push(joint);
+    }
+
+    /// Add a hinge joint constraint.
+    pub fn add_hinge_joint(&mut self, joint: HingeJoint3D) {
+        self.hinge_joints.push(joint);
+    }
+
+    /// Cast a 3D ray against the ground plane, static boxes, and dynamic bodies.
+    #[must_use]
+    pub fn ray_cast_3d(&self, from: Vec3, to: Vec3, mask: u32) -> Option<RayHit3D> {
+        let dir = to - from;
+        let len = dir.length();
+        if len <= 1e-6 {
+            return None;
+        }
+
+        let mut closest_hit: Option<RayHit3D> = None;
+
+        // 1. Ground plane at Y = 0 (Normal: Vec3::Y)
+        if from.y > 0.0 && to.y <= 0.0 {
+            let t = from.y / (from.y - to.y);
+            if (0.0..=1.0).contains(&t) {
+                let hit_pt = from + dir * t;
+                let hit_dist = len * t;
+                closest_hit = Some(RayHit3D {
+                    body_id: None,
+                    point: hit_pt,
+                    normal: Vec3::Y,
+                    distance: hit_dist,
+                });
+            }
+        }
+
+        // 2. Static AABBs
+        for aabb in &self.static_aabbs {
+            if (aabb.collision_layer & mask) == 0 {
+                continue;
+            }
+            if let Some((t, n)) = ray_intersect_aabb(from, dir, aabb.min, aabb.max) {
+                let dist = len * t;
+                if closest_hit.as_ref().is_none_or(|h| dist < h.distance) {
+                    closest_hit = Some(RayHit3D {
+                        body_id: None,
+                        point: from + dir * t,
+                        normal: n,
+                        distance: dist,
+                    });
+                }
+            }
+        }
+
+        // 3. Dynamic Bodies
+        for body in &self.bodies {
+            if (body.collision_layer & mask) == 0 {
+                continue;
+            }
+            let hit_opt = match body.collider {
+                Collider3D::Sphere { radius } => ray_intersect_sphere(from, dir, body.position, radius),
+                Collider3D::Aabb { half_extents } => {
+                    ray_intersect_aabb(from, dir, body.position - half_extents, body.position + half_extents)
+                }
+            };
+
+            if let Some((t, n)) = hit_opt {
+                let dist = len * t;
+                if closest_hit.as_ref().is_none_or(|h| dist < h.distance) {
+                    closest_hit = Some(RayHit3D {
+                        body_id: Some(body.id),
+                        point: from + dir * t,
+                        normal: n,
+                        distance: dist,
+                    });
+                }
+            }
+        }
+
+        closest_hit
+    }
+
+    /// Sweep a sphere along a segment, detecting the earliest collision point and normal.
+    #[must_use]
+    pub fn shape_cast_sphere_3d(&self, from: Vec3, to: Vec3, radius: f32, mask: u32) -> Option<RayHit3D> {
+        let dir = to - from;
+        let len = dir.length();
+        if len <= 1e-6 {
+            return None;
+        }
+
+        let mut closest_hit: Option<RayHit3D> = None;
+
+        // Ground plane at Y = 0 (bottom of sphere at from.y - radius)
+        if (from.y - radius) > 0.0 && (to.y - radius) <= 0.0 {
+            let t = (from.y - radius) / (from.y - to.y);
+            if (0.0..=1.0).contains(&t) {
+                let hit_pt = from + dir * t - Vec3::Y * radius;
+                let hit_dist = len * t;
+                closest_hit = Some(RayHit3D {
+                    body_id: None,
+                    point: hit_pt,
+                    normal: Vec3::Y,
+                    distance: hit_dist,
+                });
+            }
+        }
+
+        // Expanded static AABBs
+        let rad_vec = Vec3::splat(radius);
+        for aabb in &self.static_aabbs {
+            if (aabb.collision_layer & mask) == 0 {
+                continue;
+            }
+            let exp_min = aabb.min - rad_vec;
+            let exp_max = aabb.max + rad_vec;
+            if let Some((t, n)) = ray_intersect_aabb(from, dir, exp_min, exp_max) {
+                let dist = len * t;
+                if closest_hit.as_ref().is_none_or(|h| dist < h.distance) {
+                    closest_hit = Some(RayHit3D {
+                        body_id: None,
+                        point: from + dir * t - n * radius,
+                        normal: n,
+                        distance: dist,
+                    });
+                }
+            }
+        }
+
+        closest_hit
+    }
+
+    /// Monitor and update `Area3D` overlap sets, emitting body entered/exited delta events.
+    pub fn update_area_overlaps(&mut self) -> Vec<AreaEvent> {
+        let mut events = Vec::new();
+
+        for area in &mut self.areas {
+            let mut current_overlaps = BTreeSet::new();
+
+            for body in &self.bodies {
+                if (area.collision_mask & body.collision_layer) == 0 {
+                    continue;
+                }
+
+                let d = (body.position - area.position).length();
+                let threshold = area.collider.bounding_radius() + body.collider.bounding_radius();
+                if d <= threshold {
+                    current_overlaps.insert(body.id);
+                }
+            }
+
+            // Detect newly entered bodies
+            for &id in &current_overlaps {
+                if !area.overlapping_bodies.contains(&id) {
+                    events.push(AreaEvent::BodyEntered { area_id: area.id, body_id: id });
+                }
+            }
+
+            // Detect newly exited bodies
+            for &id in &area.overlapping_bodies {
+                if !current_overlaps.contains(&id) {
+                    events.push(AreaEvent::BodyExited { area_id: area.id, body_id: id });
+                }
+            }
+
+            area.overlapping_bodies = current_overlaps;
+        }
+
+        events
+    }
+}
+
+/// Ray vs AABB intersection test. Returns `(t, normal)`.
+fn ray_intersect_aabb(from: Vec3, dir: Vec3, min: Vec3, max: Vec3) -> Option<(f32, Vec3)> {
+    let mut tmin = f32::NEG_INFINITY;
+    let mut tmax = f32::INFINITY;
+    let mut normal = Vec3::ZERO;
+
+    for i in 0..3 {
+        let d = dir[i];
+        let p = from[i];
+        let mi = min[i];
+        let ma = max[i];
+
+        if d.abs() < 1e-6 {
+            if p < mi || p > ma {
+                return None;
+            }
+        } else {
+            let inv_d = 1.0 / d;
+            let mut t1 = (mi - p) * inv_d;
+            let mut t2 = (ma - p) * inv_d;
+            let mut n = if inv_d < 0.0 {
+                let mut v = Vec3::ZERO; v[i] = 1.0; v
+            } else {
+                let mut v = Vec3::ZERO; v[i] = -1.0; v
+            };
+
+            if t1 > t2 {
+                std::mem::swap(&mut t1, &mut t2);
+                n = -n;
+            }
+
+            if t1 > tmin {
+                tmin = t1;
+                normal = n;
+            }
+            tmax = tmax.min(t2);
+
+            if tmin > tmax {
+                return None;
+            }
+        }
+    }
+
+    if (0.0..=1.0).contains(&tmin) {
+        Some((tmin, normal))
+    } else {
+        None
+    }
+}
+
+/// Ray vs Sphere intersection test. Returns `(t, normal)`.
+fn ray_intersect_sphere(from: Vec3, dir: Vec3, center: Vec3, radius: f32) -> Option<(f32, Vec3)> {
+    let m = from - center;
+    let b = m.dot(dir);
+    let c = m.dot(m) - radius * radius;
+
+    if c > 0.0 && b > 0.0 {
+        return None;
+    }
+
+    let dir_len_sq = dir.dot(dir);
+    let discr = b * b - dir_len_sq * c;
+    if discr < 0.0 {
+        return None;
+    }
+
+    let t = (-b - discr.sqrt()) / dir_len_sq;
+    if (0.0..=1.0).contains(&t) {
+        let hit_pt = from + dir * t;
+        let normal = (hit_pt - center).normalize_or_zero();
+        Some((t, normal))
+    } else {
+        None
+    }
+}
+
+/// Godot 4 `CharacterBody3D` controller with signature `move_and_slide`.
+#[derive(Clone, PartialEq, Debug)]
+pub struct CharacterBody3D {
+    pub id: NodeId,
+    pub position: Vec3,
+    pub velocity: Vec3,
+    pub up_direction: Vec3,
+    pub floor_max_angle: f32,
+    pub floor_snap_length: f32,
+    pub max_slides: u32,
+    pub collider: Collider3D,
+    pub collision_layer: u32,
+    pub collision_mask: u32,
+    pub floor_stop_on_slope: bool,
+    on_floor: bool,
+    on_wall: bool,
+    on_ceiling: bool,
+    floor_normal: Vec3,
+    wall_normal: Vec3,
+}
+
+impl CharacterBody3D {
+    /// Construct a new CharacterBody3D controller.
+    #[must_use]
+    pub fn new(id: NodeId, position: Vec3, collider: Collider3D) -> Self {
+        Self {
+            id,
+            position,
+            velocity: Vec3::ZERO,
+            up_direction: Vec3::Y,
+            floor_max_angle: std::f32::consts::FRAC_PI_4, // 45 deg
+            floor_snap_length: 0.1,
+            max_slides: 6,
+            collider,
+            collision_layer: 1,
+            collision_mask: 1,
+            floor_stop_on_slope: true,
+            on_floor: false,
+            on_wall: false,
+            on_ceiling: false,
+            floor_normal: Vec3::Y,
+            wall_normal: Vec3::ZERO,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_on_floor(&self) -> bool {
+        self.on_floor
+    }
+
+    #[must_use]
+    pub const fn is_on_wall(&self) -> bool {
+        self.on_wall
+    }
+
+    #[must_use]
+    pub const fn is_on_ceiling(&self) -> bool {
+        self.on_ceiling
+    }
+
+    #[must_use]
+    pub const fn floor_normal(&self) -> Vec3 {
+        self.floor_normal
+    }
+
+    #[must_use]
+    pub const fn wall_normal(&self) -> Vec3 {
+        self.wall_normal
+    }
+
+    /// Godot 4 signature `move_and_slide`: slides along obstacles and updates floor/wall/ceiling state.
+    pub fn move_and_slide(&mut self, dt_seconds: f32, world: &PhysicsWorldState) -> Vec3 {
+        self.on_floor = false;
+        self.on_wall = false;
+        self.on_ceiling = false;
+
+        let mut remaining_velocity = self.velocity;
+
+        for _ in 0..self.max_slides {
+            let motion = remaining_velocity * dt_seconds;
+            if motion.length_squared() <= 1e-8 {
+                break;
+            }
+
+            let bottom_offset = self.collider.bottom_offset();
+
+            // Check collision against ground plane Y = 0
+            let mut earliest_t = 1.0_f32;
+            let mut best_normal = Vec3::Y;
+            let mut hit = false;
+
+            if motion.y < 0.0 && self.position.y >= bottom_offset {
+                let dist_to_ground = self.position.y - bottom_offset;
+                let t = dist_to_ground / (-motion.y);
+                if (0.0..earliest_t).contains(&t) {
+                    earliest_t = t;
+                    best_normal = Vec3::Y;
+                    hit = true;
+                }
+            }
+
+            // Check static AABB obstacles
+            let half_extents = match self.collider {
+                Collider3D::Sphere { radius } => Vec3::splat(radius),
+                Collider3D::Aabb { half_extents } => half_extents,
+            };
+
+            for aabb in &world.static_aabbs {
+                if (aabb.collision_layer & self.collision_mask) == 0 {
+                    continue;
+                }
+                let exp_min = aabb.min - half_extents;
+                let exp_max = aabb.max + half_extents;
+
+                if let Some((t, n)) = ray_intersect_aabb(self.position, motion, exp_min, exp_max).filter(|&(t, _)| (0.0..earliest_t).contains(&t)) {
+                    earliest_t = t;
+                    best_normal = n;
+                    hit = true;
+                }
+            }
+
+            if hit {
+                self.position += motion * earliest_t.max(0.0) + best_normal * 0.001;
+
+                let dot_up = best_normal.dot(self.up_direction);
+                let cos_floor = self.floor_max_angle.cos();
+
+                if dot_up >= cos_floor {
+                    self.on_floor = true;
+                    self.floor_normal = best_normal;
+                } else if dot_up <= -cos_floor {
+                    self.on_ceiling = true;
+                } else {
+                    self.on_wall = true;
+                    self.wall_normal = best_normal;
+                }
+
+                // Tangent slide projection
+                let rem_factor = 1.0 - earliest_t;
+                let rem_motion = motion * rem_factor;
+                let slide_motion = rem_motion - best_normal * rem_motion.dot(best_normal);
+                remaining_velocity = if dt_seconds > 0.0 { slide_motion / dt_seconds } else { Vec3::ZERO };
+
+                // Adjust body velocity vector
+                self.velocity -= best_normal * self.velocity.dot(best_normal);
+            } else {
+                self.position += motion;
+                break;
+            }
+        }
+
+        self.velocity
     }
 }
 
@@ -162,7 +676,7 @@ pub enum PhysicsBackendKind {
     SkatePortArcade,
 }
 
-/// Standard semi-implicit Euler 3D rigid body simulator.
+/// Standard semi-implicit Euler 3D rigid body simulator with joint constraints.
 #[derive(Debug)]
 pub struct StandardRigidBackend {
     state: Arc<RwLock<PhysicsWorldState>>,
@@ -227,6 +741,30 @@ impl PhysicsBackend for StandardRigidBackend {
         let static_boxes = world.static_aabbs.clone();
         let friction = self.ground_friction;
 
+        // 1. Solve spring joint constraints
+        for joint in &world.spring_joints.clone() {
+            let pos_a = world.get_body(joint.body_a).map(|b| b.position);
+            let pos_b = world.get_body(joint.body_b).map(|b| b.position);
+
+            if let (Some(pa), Some(pb)) = (pos_a, pos_b) {
+                let delta = pb - pa;
+                let dist = delta.length();
+                if dist > 1e-4 {
+                    let dir = delta / dist;
+                    let disp = dist - joint.rest_length;
+                    let spring_force = dir * (disp * joint.stiffness);
+
+                    if let Some(ba) = world.get_body_mut(joint.body_a) {
+                        ba.apply_impulse(spring_force * dt_seconds);
+                    }
+                    if let Some(bb) = world.get_body_mut(joint.body_b) {
+                        bb.apply_impulse(-spring_force * dt_seconds);
+                    }
+                }
+            }
+        }
+
+        // 2. Integrate bodies
         for body in &mut world.bodies {
             // Semi-implicit Euler: integrate velocity from gravity
             if !body.grounded {
@@ -263,9 +801,14 @@ impl PhysicsBackend for StandardRigidBackend {
 
             // Static AABB obstacle collision and sliding
             for aabb in &static_boxes {
-                resolve_static_aabb_collision(body, aabb);
+                if (aabb.collision_layer & body.collision_mask) != 0 {
+                    resolve_static_aabb_collision(body, aabb);
+                }
             }
         }
+
+        // 3. Update area overlaps
+        let _events = world.update_area_overlaps();
     }
 }
 
@@ -573,16 +1116,7 @@ mod tests {
     fn standard_rigid_gravity_and_ground_bounce() {
         let mut server = PhysicsServer3D::new_standard();
         let skater_id = NodeId::new(1, 1).unwrap();
-        let body = PhysicsBody3D {
-            id: skater_id,
-            position: Vec3::new(0.0, 5.0, 0.0),
-            velocity: Vec3::ZERO,
-            mass: 1.0,
-            restitution: 0.5,
-            grounded: false,
-            collider: Collider3D::Sphere { radius: 0.5 },
-            angular_velocity: Vec3::ZERO,
-        };
+        let body = PhysicsBody3D::new(skater_id, Vec3::new(0.0, 5.0, 0.0), Collider3D::Sphere { radius: 0.5 });
         server.add_body(body);
 
         // Step simulation forward until all bounce cycles settle to rest (t = 3.0s)
@@ -609,16 +1143,13 @@ mod tests {
         );
 
         // Position skater slightly offset from rail, moving forward (+X)
-        let body = PhysicsBody3D {
-            id: skater_id,
-            position: Vec3::new(0.0, 1.2, 0.2), // Within 0.65m snap distance
-            velocity: Vec3::new(8.0, 0.0, 1.0), // Has lateral drift
-            mass: 1.0,
-            restitution: 0.0,
-            grounded: false,
-            collider: Collider3D::Aabb { half_extents: Vec3::new(0.2, 0.4, 0.2) },
-            angular_velocity: Vec3::ZERO,
-        };
+        let mut body = PhysicsBody3D::new(
+            skater_id,
+            Vec3::new(0.0, 1.2, 0.2), // Within 0.65m snap distance
+            Collider3D::Aabb { half_extents: Vec3::new(0.2, 0.4, 0.2) },
+        );
+        body.velocity = Vec3::new(8.0, 0.0, 1.0); // Has lateral drift
+        body.restitution = 0.0;
         server.add_body(body);
 
         // Step simulation
@@ -642,16 +1173,9 @@ mod tests {
 
         let skater_id = NodeId::new(42, 1).unwrap();
         let initial_vel = Vec3::new(12.0, 0.0, 3.0);
-        let body = PhysicsBody3D {
-            id: skater_id,
-            position: Vec3::new(0.0, 0.5, 0.0),
-            velocity: initial_vel,
-            mass: 1.0,
-            restitution: 0.1,
-            grounded: true,
-            collider: Collider3D::Sphere { radius: 0.5 },
-            angular_velocity: Vec3::ZERO,
-        };
+        let mut body = PhysicsBody3D::new(skater_id, Vec3::new(0.0, 0.5, 0.0), Collider3D::Sphere { radius: 0.5 });
+        body.velocity = initial_vel;
+        body.grounded = true;
         server.add_body(body);
 
         // Step for 10 frames in standard mode
@@ -687,35 +1211,24 @@ mod tests {
     #[test]
     fn static_aabb_obstacle_sliding_collision() {
         let mut server = PhysicsServer3D::new_standard();
-        // Add a wall from X = 5 to 6, Y = 0 to 5, Z = -5 to 5
         server.world_state.write().unwrap().add_static_aabb(
             Vec3::new(5.0, 0.0, -5.0),
             Vec3::new(6.0, 5.0, 5.0),
         );
 
         let body_id = NodeId::new(10, 1).unwrap();
-        // Moving fast towards wall at (+X)
-        let body = PhysicsBody3D {
-            id: body_id,
-            position: Vec3::new(4.5, 0.5, 0.0),
-            velocity: Vec3::new(10.0, 0.0, 2.0), // Has forward + lateral velocity
-            mass: 1.0,
-            restitution: 0.0,
-            grounded: true,
-            collider: Collider3D::Sphere { radius: 0.5 },
-            angular_velocity: Vec3::ZERO,
-        };
+        let mut body = PhysicsBody3D::new(body_id, Vec3::new(4.5, 0.5, 0.0), Collider3D::Sphere { radius: 0.5 });
+        body.velocity = Vec3::new(10.0, 0.0, 2.0);
+        body.restitution = 0.0;
+        body.grounded = true;
         server.add_body(body);
 
-        // Step simulation
         for _ in 0..10 {
             server.step(1.0 / 60.0);
         }
 
         let body_after = server.get_body(body_id).unwrap();
-        // Body cannot penetrate wall past X = 5.0 - radius (4.5)
         assert!(body_after.position.x <= 4.5 + 1e-4);
-        // X velocity stopped by wall
         assert!(body_after.velocity.x.abs() < 1e-3);
     }
 
@@ -723,16 +1236,10 @@ mod tests {
     fn skate_pop_impulse_and_wobble_damping() {
         let mut backend = SkatePortArcadeBackend::new();
         let body_id = NodeId::new(20, 1).unwrap();
-        let body = PhysicsBody3D {
-            id: body_id,
-            position: Vec3::new(0.0, 0.5, 0.0),
-            velocity: Vec3::new(10.0, 0.0, 0.0), // Fast speed > 6.0
-            mass: 1.0,
-            restitution: 0.0,
-            grounded: true,
-            collider: Collider3D::Sphere { radius: 0.5 },
-            angular_velocity: Vec3::new(5.0, 0.0, 5.0), // High wobble
-        };
+        let mut body = PhysicsBody3D::new(body_id, Vec3::new(0.0, 0.5, 0.0), Collider3D::Sphere { radius: 0.5 });
+        body.velocity = Vec3::new(10.0, 0.0, 0.0);
+        body.angular_velocity = Vec3::new(5.0, 0.0, 5.0);
+        body.grounded = true;
         backend.state.write().unwrap().add_body(body);
 
         // Pop trick with base impulse 5.0
@@ -747,5 +1254,96 @@ mod tests {
         backend.step(1.0 / 60.0);
         let damped = backend.state().get_body(body_id).cloned().unwrap();
         assert!(damped.angular_velocity.x < initial_wobble);
+    }
+
+    #[test]
+    fn character_body_3d_move_and_slide_floor_and_wall() {
+        let mut world = PhysicsWorldState::new();
+        world.add_static_aabb(Vec3::new(5.0, 0.0, -5.0), Vec3::new(6.0, 5.0, 5.0));
+
+        let char_id = NodeId::new(50, 1).unwrap();
+        let mut char_body = CharacterBody3D::new(char_id, Vec3::new(0.0, 0.5, 0.0), Collider3D::Sphere { radius: 0.5 });
+        char_body.velocity = Vec3::new(10.0, -2.0, 0.0); // Moving towards wall and falling
+
+        let _ = char_body.move_and_slide(0.1, &world);
+        assert!(char_body.is_on_floor());
+        assert!((char_body.position.y - 0.5).abs() < 0.05);
+
+        // Run until hitting wall at X = 4.5
+        for _ in 0..10 {
+            char_body.velocity = Vec3::new(5.0, 0.0, 0.0);
+            char_body.move_and_slide(0.1, &world);
+        }
+
+        assert!(char_body.is_on_wall());
+        assert!(char_body.wall_normal().x < 0.0);
+        assert!(char_body.position.x <= 4.51);
+    }
+
+    #[test]
+    fn character_body_2d_move_and_slide() {
+        let obstacles = vec![StaticRect2D {
+            min: [5.0, 0.0],
+            max: [6.0, 5.0],
+            collision_layer: 1,
+        }];
+
+        let mut body = CharacterBody2D::new([0.0, 0.5]);
+        body.velocity = [10.0, -6.0];
+
+        body.move_and_slide(0.1, &obstacles);
+        assert!(body.is_on_floor);
+
+        for _ in 0..10 {
+            body.velocity = [5.0, 0.0];
+            body.move_and_slide(0.1, &obstacles);
+        }
+        assert!(body.is_on_wall);
+    }
+
+    #[test]
+    fn ray_cast_and_shape_cast_3d() {
+        let mut world = PhysicsWorldState::new();
+        let box_min = Vec3::new(5.0, 0.0, -1.0);
+        let box_max = Vec3::new(7.0, 2.0, 1.0);
+        world.add_static_aabb(box_min, box_max);
+
+        // Raycast straight at the box
+        let hit = world.ray_cast_3d(Vec3::new(0.0, 1.0, 0.0), Vec3::new(10.0, 1.0, 0.0), 1).expect("ray hits box");
+        assert!((hit.point.x - 5.0).abs() < 1e-3);
+        assert_eq!(hit.normal, Vec3::NEG_X);
+
+        // Shapecast sphere towards box: hits at X = 5.0 - radius (0.5) = 4.5
+        let shape_hit = world.shape_cast_sphere_3d(Vec3::new(0.0, 1.0, 0.0), Vec3::new(10.0, 1.0, 0.0), 0.5, 1).expect("sphere hits box");
+        assert!((shape_hit.point.x - 5.0).abs() < 1e-3);
+        assert!((shape_hit.distance - 4.5).abs() < 1e-3);
+    }
+
+    #[test]
+    fn area_3d_body_entered_and_exited_events() {
+        let mut world = PhysicsWorldState::new();
+        let area_id = NodeId::new(99, 1).unwrap();
+        let area = Area3D::new(area_id, Vec3::new(10.0, 0.0, 0.0), Collider3D::Sphere { radius: 2.0 });
+        world.add_area(area);
+
+        let body_id = NodeId::new(100, 1).unwrap();
+        let mut body = PhysicsBody3D::new(body_id, Vec3::new(0.0, 0.0, 0.0), Collider3D::Sphere { radius: 0.5 });
+        world.add_body(body.clone());
+
+        // Initially body is at X=0, outside area at X=10
+        let events1 = world.update_area_overlaps();
+        assert!(events1.is_empty());
+
+        // Move body into area at X=10
+        body.position = Vec3::new(10.0, 0.0, 0.0);
+        world.add_body(body.clone());
+        let events2 = world.update_area_overlaps();
+        assert_eq!(events2, vec![AreaEvent::BodyEntered { area_id, body_id }]);
+
+        // Move body out of area
+        body.position = Vec3::new(20.0, 0.0, 0.0);
+        world.add_body(body);
+        let events3 = world.update_area_overlaps();
+        assert_eq!(events3, vec![AreaEvent::BodyExited { area_id, body_id }]);
     }
 }

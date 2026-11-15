@@ -1521,6 +1521,7 @@ dependencies = [
  "foreplay-atlas",
  "foreplay-audio",
  "foreplay-core",
+ "foreplay-export",
  "foreplay-gdscript",
  "foreplay-harness",
  "foreplay-ir",
@@ -1530,6 +1531,18 @@ dependencies = [
  "foreplay-porthost",
  "foreplay-render",
  "foreplay-script",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "foreplay-export"
+version = "0.1.0"
+dependencies = [
+ "foreplay-ir",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1548,9 +1561,11 @@ version = "0.1.0"
 dependencies = [
  "foreplay-atlas",
  "foreplay-core",
+ "foreplay-export",
  "foreplay-gdscript",
  "foreplay-ir",
  "foreplay-porthost",
+ "foreplay-script",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -1622,13 +1637,18 @@ version = "0.1.0"
 dependencies = [
  "bevy_ecs",
  "foreplay-atlas",
+ "foreplay-audio",
  "foreplay-core",
+ "foreplay-export",
  "foreplay-gdscript",
  "foreplay-harness",
  "foreplay-ir",
  "foreplay-net",
  "foreplay-physics",
+ "foreplay-platform",
  "foreplay-porthost",
+ "foreplay-render",
+ "foreplay-script",
  "proptest",
  "serde_json",
 ]

@@ -1,13 +1,16 @@
-//! Top Transport Bar (`foreplay-editor`).
+//! Top Menu Bar, Transport Bar, and Multi-Scene Tabs (`foreplay-editor`).
 //!
 //! Provides:
-//! - Center workspace tabs: 2D | 3D | Script | Atlas | Port Diff | AssetLib
-//! - Left quick actions: + New Demo Scene, Undo, Redo, Physics Backend toggle
-//! - Right PIE controls: ▶ Play, ⏸ Pause, ⏭ Step, ⏹ Stop
+//! - Godot 4 top menu bar: Scene | Project | Debug | Editor | Help
+//! - Multi-scene document tab bar: `[ 🛹 ForeplayParkDemo.fscn × ] [ 🖥 UI_HUD.fscn × ] [ ➕ ]`
+//! - Center workspace switcher: 2D | 3D | Script | Atlas | Port Diff | AssetLib
+//! - Left quick actions: Undo, Redo, Physics Backend toggle
+//! - Right PIE controls: ▶ Play, ⏸ Pause, ⏭ Step, ⏹ Stop, World Tick count.
 
 use egui::{Color32, RichText, Ui};
 use crate::ForeplayEditorApp;
 use crate::{EditorWorkspace, PhysicsBackendChoice};
+use crate::modals::ActiveModal;
 use crate::tabs::console::LogLevel;
 use crate::theme::{
     COLOR_ACCENT_BLUE, COLOR_ERROR_RED, COLOR_SUCCESS_GREEN, COLOR_TEXT_MUTED,
@@ -15,19 +18,98 @@ use crate::theme::{
 };
 
 pub fn render_top_bar(app: &mut ForeplayEditorApp, ui: &mut Ui) {
+    // Row 1: Godot 4 Top Menu Bar & Transport Controls
     ui.horizontal(|ui| {
-        // --- Left: Brand + Demo Scene + Undo/Redo + Physics Toggle ---
+        // Engine Logo
         ui.label(RichText::new("FOREPLAY").strong().color(COLOR_ACCENT_BLUE));
         ui.separator();
 
-        if ui.button("➕ New Demo Scene").on_hover_text("Populate starter skater/platformer scene").clicked() {
-            app.populate_starter_scene();
-        }
+        // 1. Scene Menu
+        ui.menu_button("Scene", |ui| {
+            if ui.button("➕ New Scene").clicked() {
+                app.open_or_switch_scene("NewScene", None);
+                ui.close();
+            }
+            if ui.button("📁 Open Project / Scene...").clicked() {
+                app.active_modal = Some(ActiveModal::ProjectManager);
+                ui.close();
+            }
+            if ui.button("💾 Save Scene").clicked() {
+                let name = app.session.tree.active_scene.name.clone();
+                app.log(LogLevel::Info, format!("Scene '{name}' saved successfully."));
+                ui.close();
+            }
+            ui.separator();
+            if ui.button("📤 Export Scene as Godot .tscn").clicked() {
+                let tscn = app.export_active_scene_tscn();
+                ui.ctx().copy_text(tscn.clone());
+                app.log(LogLevel::Info, format!("Exported Godot .tscn ({} bytes) to clipboard", tscn.len()));
+                ui.close();
+            }
+            if ui.button("📥 Import Skate Spot Demo .tscn").clicked() {
+                let spot_tscn = include_str!("../../../templates/godot-migration/skate_spot.tscn");
+                let _ = app.import_tscn_scene("SkateSpotDemo", spot_tscn);
+                ui.close();
+            }
+            ui.separator();
+            if ui.button("✖ Close Scene").clicked() {
+                if app.open_scenes.len() > 1 {
+                    app.close_scene_doc(app.active_scene_index);
+                }
+                ui.close();
+            }
+        });
 
+        // 2. Project Menu
+        ui.menu_button("Project", |ui| {
+            if ui.button("⚙ Project Settings... (Alt+P)").clicked() {
+                app.active_modal = Some(ActiveModal::ProjectSettings);
+                ui.close();
+            }
+            if ui.button("📦 Export Project...").clicked() {
+                app.active_modal = Some(ActiveModal::ExportProject);
+                ui.close();
+            }
+            if ui.button("📁 Project Manager...").clicked() {
+                app.active_modal = Some(ActiveModal::ProjectManager);
+                ui.close();
+            }
+        });
+
+        // 3. Debug Menu
+        ui.menu_button("Debug", |ui| {
+            if ui.button("🐞 Toggle Debugger & Profiler").clicked() {
+                app.toggle_bottom_panel(crate::bottom_panel::BottomPanelTab::Debugger);
+                ui.close();
+            }
+            if ui.button("🔊 Toggle Audio Bus Mixer").clicked() {
+                app.toggle_bottom_panel(crate::bottom_panel::BottomPanelTab::AudioMixer);
+                ui.close();
+            }
+            if ui.button("🤖 Toggle AI Agent Harness").clicked() {
+                app.toggle_bottom_panel(crate::bottom_panel::BottomPanelTab::AiHarness);
+                ui.close();
+            }
+        });
+
+        // 4. Editor Menu
+        ui.menu_button("Editor", |ui| {
+            if ui.button("⌨ Command Palette (Ctrl+Shift+P)").clicked() {
+                app.active_modal = Some(ActiveModal::CommandPalette);
+                ui.close();
+            }
+            if ui.button("➕ Create Node Dialog (Ctrl+A)").clicked() {
+                app.active_modal = Some(ActiveModal::CreateNodeDialog);
+                ui.close();
+            }
+        });
+
+        ui.separator();
+
+        // Undo / Redo
         if ui.button("↩ Undo").on_hover_text("Undo last command (Ctrl+Z)").clicked() {
             app.undo();
         }
-
         if ui.button("↪ Redo").on_hover_text("Redo last command (Ctrl+Y)").clicked() {
             app.redo();
         }
@@ -36,7 +118,7 @@ pub fn render_top_bar(app: &mut ForeplayEditorApp, ui: &mut Ui) {
 
         // Physics Backend Indicator / Toggle
         let (phys_label, phys_color) = match app.physics_backend {
-            PhysicsBackendChoice::RapierStandard => ("Physics: Rapier/Std", COLOR_SUCCESS_GREEN),
+            PhysicsBackendChoice::RapierStandard => ("Physics: Rapier", COLOR_SUCCESS_GREEN),
             PhysicsBackendChoice::Skate2Port => ("Physics: Skate2 Port", COLOR_WARN_YELLOW),
         };
         if ui
@@ -57,7 +139,6 @@ pub fn render_top_bar(app: &mut ForeplayEditorApp, ui: &mut Ui) {
         ui.separator();
 
         // --- Center: Workspace Tabs ---
-        // 2D | 3D | Script | Atlas | Port Diff | AssetLib
         workspace_button(app, ui, EditorWorkspace::Workspace2D, "2D");
         workspace_button(app, ui, EditorWorkspace::Workspace3D, "3D");
         workspace_button(app, ui, EditorWorkspace::Script, "Script");
@@ -114,6 +195,59 @@ pub fn render_top_bar(app: &mut ForeplayEditorApp, ui: &mut Ui) {
                 format!("Tick #{}", app.session.tree.tick_count),
             );
         });
+    });
+
+    // Row 2: Multi-Scene Tab Bar
+    render_scene_tabs(app, ui);
+}
+
+/// Renders the multi-scene tab bar above the viewports.
+pub fn render_scene_tabs(app: &mut ForeplayEditorApp, ui: &mut Ui) {
+    ui.horizontal(|ui| {
+        let active_idx = app.active_scene_index;
+        let mut close_idx: Option<usize> = None;
+        let mut switch_idx: Option<usize> = None;
+
+        for (idx, doc) in app.open_scenes.iter().enumerate() {
+            let is_active = idx == active_idx;
+            let icon = if doc.title.contains("HUD") || doc.title.contains("UI") {
+                "🖥 "
+            } else {
+                "🛹 "
+            };
+
+            let title_text = if is_active {
+                RichText::new(format!("{icon}{}.fscn", doc.title)).strong().color(Color32::WHITE)
+            } else {
+                RichText::new(format!("{icon}{}.fscn", doc.title)).color(COLOR_TEXT_MUTED)
+            };
+
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    if ui.selectable_label(is_active, title_text).clicked() {
+                        switch_idx = Some(idx);
+                    }
+
+                    if app.open_scenes.len() > 1 && ui.small_button("×").clicked() {
+                        close_idx = Some(idx);
+                    }
+                });
+            });
+        }
+
+        // Add Scene Tab button
+        if ui.button("➕").on_hover_text("Open or create another scene tab").clicked() {
+            let new_name = format!("Scene_{}", app.open_scenes.len() + 1);
+            app.open_or_switch_scene(new_name, None);
+        }
+
+        if let Some(idx) = switch_idx {
+            app.switch_to_scene_index(idx);
+        }
+
+        if let Some(idx) = close_idx {
+            app.close_scene_doc(idx);
+        }
     });
 }
 

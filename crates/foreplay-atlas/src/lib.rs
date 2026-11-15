@@ -1,6 +1,13 @@
 //! Foreplay Atlas (`foreplay-atlas`) — Semantic layer modeled on `@3jse/atlas`.
 //! Compiles `IrScene` + declared contracts into human- and agent-legible meaning graphs.
 
+pub mod visual_graph;
+
+pub use visual_graph::{
+    MathOperator, VisualGraph, VisualGraphConnection, VisualGraphExecutionReport, VisualGraphNode,
+    VisualGraphNodeKind, VisualGraphTrigger,
+};
+
 use foreplay_ir::{FeelSpecKnob, IrScene, NodeId};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -515,4 +522,152 @@ mod tests {
         assert!(!report_warn.is_healthy);
         assert_eq!(report_warn.warning_count, 1);
     }
+
+    #[test]
+    fn visual_graph_evaluation_dataflow_and_math() {
+        use foreplay_ir::IrValue;
+
+        let mut scene = IrScene::new("VisualGraphScene");
+        let skater_id = NodeId::new(1, 1).unwrap();
+        let hud_id = NodeId::new(2, 1).unwrap();
+
+        let mut skater_node = IrNode {
+            id: skater_id,
+            name: "Skater".into(),
+            class_name: "CharacterBody3D".into(),
+            parent: None,
+            instance_scene: None,
+            properties: BTreeMap::new(),
+            groups: vec!["player".into()],
+        };
+        skater_node
+            .properties
+            .insert("speed".into(), IrValue::F64(10.0));
+        scene.nodes.insert(skater_id, skater_node);
+
+        let hud_node = IrNode {
+            id: hud_id,
+            name: "HUD".into(),
+            class_name: "Control".into(),
+            parent: None,
+            instance_scene: None,
+            properties: BTreeMap::new(),
+            groups: vec!["ui".into()],
+        };
+        scene.nodes.insert(hud_id, hud_node);
+
+        let mut graph = VisualGraph::new("vg_speed", "SpeedTracker");
+        graph.add_node(VisualGraphNode::new(
+            1,
+            VisualGraphNodeKind::OnProcess,
+            [0.0, 0.0],
+        ));
+        graph.add_node(VisualGraphNode::new(
+            2,
+            VisualGraphNodeKind::GetProperty {
+                node_id: skater_id,
+                property: "speed".into(),
+            },
+            [100.0, 0.0],
+        ));
+        graph.add_node(
+            VisualGraphNode::new(
+                3,
+                VisualGraphNodeKind::MathOp {
+                    op: MathOperator::Multiply,
+                },
+                [200.0, 0.0],
+            )
+            .with_property("b", IrValue::F64(2.0)),
+        );
+        graph.add_node(VisualGraphNode::new(
+            4,
+            VisualGraphNodeKind::SetProperty {
+                node_id: hud_id,
+                property: "display_speed".into(),
+            },
+            [300.0, 0.0],
+        ));
+        graph.add_node(VisualGraphNode::new(
+            5,
+            VisualGraphNodeKind::TuneFeel {
+                key: "speed_scale".into(),
+            },
+            [400.0, 0.0],
+        ));
+
+        graph.connect(1, "exec", 4, "exec");
+        graph.connect(2, "value", 3, "a");
+        graph.connect(3, "result", 4, "value");
+        graph.connect(4, "exec", 5, "exec");
+        graph.connect(3, "result", 5, "value");
+
+        let report = graph.evaluate(&VisualGraphTrigger::OnProcess { delta: 0.016 }, &mut scene);
+
+        assert!(report.executed_nodes.contains(&1));
+        assert!(report.executed_nodes.contains(&4));
+        assert!(report.executed_nodes.contains(&5));
+
+        assert_eq!(
+            scene.nodes[&hud_id].properties.get("display_speed"),
+            Some(&IrValue::F64(20.0))
+        );
+        assert_eq!(scene.feel_overrides.get("speed_scale"), Some(&20.0));
+    }
+
+    #[test]
+    fn visual_graph_compiles_to_semantic_edges() {
+        let skater_id = NodeId::new(1, 1).unwrap();
+        let hud_id = NodeId::new(2, 1).unwrap();
+        let camera_id = NodeId::new(3, 1).unwrap();
+
+        let mut graph = VisualGraph::new("vg_feel", "FeelFlow");
+        graph.add_node(VisualGraphNode::new(
+            1,
+            VisualGraphNodeKind::GetProperty {
+                node_id: skater_id,
+                property: "velocity".into(),
+            },
+            [0.0, 0.0],
+        ));
+        graph.add_node(VisualGraphNode::new(
+            2,
+            VisualGraphNodeKind::SetProperty {
+                node_id: hud_id,
+                property: "hud_velocity".into(),
+            },
+            [100.0, 0.0],
+        ));
+        graph.add_node(VisualGraphNode::new(
+            3,
+            VisualGraphNodeKind::EmitSignal {
+                from_node: skater_id,
+                signal_name: "trick_landed".into(),
+            },
+            [200.0, 0.0],
+        ));
+        graph.add_node(VisualGraphNode::new(
+            4,
+            VisualGraphNodeKind::SetProperty {
+                node_id: camera_id,
+                property: "shake_trauma".into(),
+            },
+            [300.0, 0.0],
+        ));
+
+        graph.connect(1, "value", 2, "value");
+        graph.connect(3, "exec", 4, "exec");
+
+        let edges = graph.compile_to_semantic_edges();
+        assert_eq!(edges.len(), 2);
+
+        let edge_dataflow = edges.iter().find(|e| e.from == skater_id && e.to == hud_id);
+        assert!(edge_dataflow.is_some());
+        assert!(edge_dataflow.unwrap().relation.contains("velocity"));
+
+        let edge_signal = edges.iter().find(|e| e.from == skater_id && e.to == camera_id);
+        assert!(edge_signal.is_some());
+        assert!(edge_signal.unwrap().relation.contains("trick_landed"));
+    }
 }
+

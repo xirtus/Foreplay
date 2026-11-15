@@ -4,7 +4,9 @@
 //! Visual Graph, and the AI Harness) around one deterministic, git-diffable,
 //! borrow-safe data model.
 
+pub mod catalog;
 pub mod fscn;
+pub mod project;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -12,7 +14,11 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
 
+pub use catalog::{
+    builtin_node_catalog, get_node_class, is_subclass_of, NodeCategory, NodeClassSpec, SignalSpec,
+};
 pub use fscn::FscnParseError;
+pub use project::{InputBinding, InputMapIr, ProjectSettingsIr};
 
 /// Generational handle identifying a `Node` in a `SceneTree` or `IrScene`.
 /// Mirrors Godot's `ObjectID` without raw pointer aliasing or `RefCell` cycles.
@@ -243,6 +249,8 @@ pub enum IrError {
     NodeNotFound(NodeId),
     PropertyNotFound(String),
     InvalidHierarchyCycle(NodeId),
+    ConnectionAlreadyExists(SignalConnection),
+    ConnectionNotFound(SignalConnection),
 }
 
 impl fmt::Display for IrError {
@@ -252,6 +260,8 @@ impl fmt::Display for IrError {
             Self::NodeNotFound(id) => write!(f, "node not found: {id:?}"),
             Self::PropertyNotFound(prop) => write!(f, "property not found: {prop}"),
             Self::InvalidHierarchyCycle(id) => write!(f, "cycle detected reparenting {id:?}"),
+            Self::ConnectionAlreadyExists(c) => write!(f, "signal connection already exists: {c:?}"),
+            Self::ConnectionNotFound(c) => write!(f, "signal connection not found: {c:?}"),
         }
     }
 }
@@ -277,6 +287,31 @@ pub enum EditorCommand {
         key: String,
         old_value: Option<f64>,
         new_value: Option<f64>,
+    },
+    RenameNode {
+        node_id: NodeId,
+        old_name: String,
+        new_name: String,
+    },
+    ReparentNode {
+        node_id: NodeId,
+        old_parent: Option<NodeId>,
+        new_parent: Option<NodeId>,
+    },
+    ConnectSignal {
+        connection: SignalConnection,
+    },
+    DisconnectSignal {
+        connection: SignalConnection,
+    },
+    SetGroups {
+        node_id: NodeId,
+        old_groups: Vec<String>,
+        new_groups: Vec<String>,
+    },
+    Batch {
+        label: String,
+        commands: Vec<EditorCommand>,
     },
 }
 
@@ -305,6 +340,43 @@ impl EditorCommand {
                 key: key.clone(),
                 old_value: *new_value,
                 new_value: *old_value,
+            },
+            Self::RenameNode {
+                node_id,
+                old_name,
+                new_name,
+            } => Self::RenameNode {
+                node_id: *node_id,
+                old_name: new_name.clone(),
+                new_name: old_name.clone(),
+            },
+            Self::ReparentNode {
+                node_id,
+                old_parent,
+                new_parent,
+            } => Self::ReparentNode {
+                node_id: *node_id,
+                old_parent: *new_parent,
+                new_parent: *old_parent,
+            },
+            Self::ConnectSignal { connection } => Self::DisconnectSignal {
+                connection: connection.clone(),
+            },
+            Self::DisconnectSignal { connection } => Self::ConnectSignal {
+                connection: connection.clone(),
+            },
+            Self::SetGroups {
+                node_id,
+                old_groups,
+                new_groups,
+            } => Self::SetGroups {
+                node_id: *node_id,
+                old_groups: new_groups.clone(),
+                new_groups: old_groups.clone(),
+            },
+            Self::Batch { label, commands } => Self::Batch {
+                label: label.clone(),
+                commands: commands.iter().rev().map(Self::inverse).collect(),
             },
         }
     }
@@ -355,6 +427,81 @@ impl EditorCommand {
                         scene.feel_overrides.remove(key);
                     }
                 }
+                Ok(())
+            }
+            Self::RenameNode {
+                node_id, new_name, ..
+            } => {
+                let target = scene
+                    .nodes
+                    .get_mut(node_id)
+                    .ok_or(IrError::NodeNotFound(*node_id))?;
+                target.name = new_name.clone();
+                Ok(())
+            }
+            Self::ReparentNode {
+                node_id,
+                new_parent,
+                ..
+            } => {
+                if !scene.nodes.contains_key(node_id) {
+                    return Err(IrError::NodeNotFound(*node_id));
+                }
+                if let Some(parent_id) = new_parent
+                    && !scene.nodes.contains_key(parent_id)
+                {
+                    return Err(IrError::NodeNotFound(*parent_id));
+                }
+                if scene.would_create_cycle(*node_id, *new_parent) {
+                    return Err(IrError::InvalidHierarchyCycle(*node_id));
+                }
+                let target = scene
+                    .nodes
+                    .get_mut(node_id)
+                    .ok_or(IrError::NodeNotFound(*node_id))?;
+                target.parent = *new_parent;
+                Ok(())
+            }
+            Self::ConnectSignal { connection } => {
+                if !scene.nodes.contains_key(&connection.from_node) {
+                    return Err(IrError::NodeNotFound(connection.from_node));
+                }
+                if !scene.nodes.contains_key(&connection.to_node) {
+                    return Err(IrError::NodeNotFound(connection.to_node));
+                }
+                if scene.connections.contains(connection) {
+                    return Err(IrError::ConnectionAlreadyExists(connection.clone()));
+                }
+                scene.connections.push(connection.clone());
+                Ok(())
+            }
+            Self::DisconnectSignal { connection } => {
+                let pos = scene
+                    .connections
+                    .iter()
+                    .position(|c| c == connection)
+                    .ok_or_else(|| IrError::ConnectionNotFound(connection.clone()))?;
+                scene.connections.remove(pos);
+                Ok(())
+            }
+            Self::SetGroups {
+                node_id,
+                new_groups,
+                ..
+            } => {
+                let target = scene
+                    .nodes
+                    .get_mut(node_id)
+                    .ok_or(IrError::NodeNotFound(*node_id))?;
+                target.groups = new_groups.clone();
+                Ok(())
+            }
+            Self::Batch { commands, .. } => {
+                let mut staged = scene.clone();
+                for sub_cmd in commands {
+                    sub_cmd.apply(&mut staged)?;
+                }
+                *scene = staged;
                 Ok(())
             }
         }
@@ -574,5 +721,55 @@ mod tests {
         let scene_json = serde_json::to_string(&scene).unwrap();
         let scene_deser: IrScene = serde_json::from_str(&scene_json).unwrap();
         assert_eq!(scene, scene_deser);
+    }
+
+    #[test]
+    fn builtin_catalog_covers_48_plus_classes_and_inheritance() {
+        let catalog = builtin_node_catalog();
+        assert!(catalog.len() >= 48, "expected at least 48 classes, got {}", catalog.len());
+
+        // Check essential Godot 4 classes exist
+        assert!(catalog.contains_key("Node"));
+        assert!(catalog.contains_key("Node2D"));
+        assert!(catalog.contains_key("CharacterBody2D"));
+        assert!(catalog.contains_key("Node3D"));
+        assert!(catalog.contains_key("CharacterBody3D"));
+        assert!(catalog.contains_key("Control"));
+        assert!(catalog.contains_key("Button"));
+        assert!(catalog.contains_key("AnimationPlayer"));
+        assert!(catalog.contains_key("AudioStreamPlayer3D"));
+
+        // Check inheritance chains
+        assert!(is_subclass_of("CharacterBody3D", "Node3D"));
+        assert!(is_subclass_of("CharacterBody3D", "Node"));
+        assert!(is_subclass_of("Button", "Control"));
+        assert!(is_subclass_of("CheckBox", "Control"));
+        assert!(!is_subclass_of("Node3D", "Node2D"));
+
+        // Check signals
+        let button_spec = get_node_class("Button").unwrap();
+        assert!(button_spec.built_in_signals.iter().any(|s| s.name == "pressed"));
+
+        // Check badge colors
+        assert_eq!(NodeCategory::Node3D.badge_color(), [0.95, 0.45, 0.40, 1.0]);
+    }
+
+    #[test]
+    fn input_map_and_project_settings_roundtrip() {
+        let mut settings = ProjectSettingsIr::default_project("SanVanelona");
+        settings.physics_ticks_per_second = 120;
+        settings.input_map.bind("special_trick", InputBinding::key("F"));
+        settings.input_map.bind("special_trick", InputBinding::joy_button(4));
+
+        let toml_str = settings.to_toml_string();
+        let parsed = ProjectSettingsIr::from_toml_str(&toml_str).expect("parse toml project settings");
+
+        assert_eq!(parsed.name, "SanVanelona");
+        assert_eq!(parsed.physics_ticks_per_second, 120);
+        assert_eq!(parsed.input_map.bindings_for("special_trick").len(), 2);
+        assert_eq!(
+            parsed.input_map.bindings_for("special_trick")[0],
+            InputBinding::Key { keycode: "F".into() }
+        );
     }
 }

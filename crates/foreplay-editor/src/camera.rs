@@ -105,6 +105,12 @@ impl Camera3D {
     pub fn zoom(&mut self, factor: f32) {
         self.distance = (self.distance * factor).clamp(1.5, 300.0);
     }
+
+    /// Aligns camera view angles to a specific cardinal orientation.
+    pub fn align_cardinal(&mut self, yaw: f32, pitch: f32) {
+        self.yaw = yaw;
+        self.pitch = pitch.clamp(-1.45, 1.45);
+    }
 }
 
 /// 2D pan/zoom viewport camera.
@@ -148,6 +154,7 @@ impl Camera2D {
 pub enum GizmoMode {
     Select,
     Translate,
+    Rotate,
     Scale,
 }
 

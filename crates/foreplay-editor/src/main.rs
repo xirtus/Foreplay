@@ -1,12 +1,16 @@
 //! Foreplay Game Engine Editor Executable (`foreplay-editor`).
 //!
 //! Dual-mode entrypoint:
-//! - Default / `--headless`: Executes full headless smoke verification across all 6 workspaces
-//!   (`Workspace2D`, `Workspace3D`, `Script`, `AtlasGraph`, `PortDiff`, `AssetLib`),
-//!   verifies non-empty paint shapes, prints status report, and exits 0 cleanly.
+//! - Default / `--headless`: Executes full headless smoke verification across:
+//!   - All 6 top workspaces (`Workspace2D`, `Workspace3D`, `Script`, `AtlasGraph`, `PortDiff`, `AssetLib`)
+//!   - All 7 bottom panel tabs (`Output`, `Debugger`, `AudioMixer`, `Animation`, `ShaderEditor`, `TileMap`, `AiHarness`)
+//!   - All 5 active modals (`ProjectManager`, `ProjectSettings`, `ExportProject`, `CommandPalette`, `CreateNodeDialog`)
+//!     verifies non-empty paint shapes, prints status report, and exits 0 cleanly.
 //! - `--gui`: Launches the native desktop `eframe` window.
 
 use std::env;
+use foreplay_editor::bottom_panel::BottomPanelTab;
+use foreplay_editor::modals::ActiveModal;
 use foreplay_editor::{EditorWorkspace, ForeplayEditorApp};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -35,6 +39,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Foreplay Game Engine Editor v0.1.0 (Headless Smoke Verification)");
         println!("Project: '{}' | Nodes: {}", app.session.tree.active_scene.name, app.session.tree.active_scene.nodes.len());
 
+        // 1. Verify all 6 workspaces
+        println!("\n[1/3] Verifying IDE Workspaces:");
         let workspaces = [
             EditorWorkspace::Workspace3D,
             EditorWorkspace::Workspace2D,
@@ -56,7 +62,55 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             output.textures_delta.clear();
         }
 
-        println!("Headless smoke verification: 100% PASS across all 6 IDE workspaces.");
+        // 2. Verify all 7 bottom panel tabs
+        println!("\n[2/3] Verifying Bottom Panel Docks:");
+        let bottom_tabs = [
+            BottomPanelTab::Output,
+            BottomPanelTab::Debugger,
+            BottomPanelTab::AudioMixer,
+            BottomPanelTab::Animation,
+            BottomPanelTab::ShaderEditor,
+            BottomPanelTab::TileMap,
+            BottomPanelTab::AiHarness,
+        ];
+
+        for tab in bottom_tabs {
+            app.bottom_panel_state.is_expanded = true;
+            app.bottom_panel_state.active_tab = tab;
+            let mut output = app.run_headless_frame([1280.0, 720.0]);
+            let shapes_count = output.shapes.len();
+            assert!(
+                shapes_count > 0,
+                "Bottom tab {tab:?} produced 0 shapes in headless frame"
+            );
+            println!("  ✓ Bottom Dock {tab:?}: {shapes_count} clipped paint shapes rendered cleanly");
+            output.textures_delta.clear();
+        }
+
+        // 3. Verify all 5 active modals
+        println!("\n[3/3] Verifying Modal Dialogs:");
+        let modals = [
+            ActiveModal::ProjectManager,
+            ActiveModal::ProjectSettings,
+            ActiveModal::ExportProject,
+            ActiveModal::CommandPalette,
+            ActiveModal::CreateNodeDialog,
+        ];
+
+        for modal in modals {
+            app.active_modal = Some(modal);
+            let mut output = app.run_headless_frame([1280.0, 720.0]);
+            let shapes_count = output.shapes.len();
+            assert!(
+                shapes_count > 0,
+                "Modal {modal:?} produced 0 shapes in headless frame"
+            );
+            println!("  ✓ Modal {modal:?}: {shapes_count} clipped paint shapes rendered cleanly");
+            output.textures_delta.clear();
+        }
+
+        app.active_modal = None;
+        println!("\nHeadless smoke verification: 100% PASS across all 6 IDE workspaces, 7 bottom docks, and 5 modals.");
     }
 
     Ok(())

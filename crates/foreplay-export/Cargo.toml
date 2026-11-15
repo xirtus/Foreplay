@@ -1,0 +1,16 @@
+[package]
+name = "foreplay-export"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-3.0-only"
+description = "Phase 6 One-Click Game Exporter (.fpck archive + Linux/SteamDeck, Windows, macOS .app, WebGPU URL, and SexOS sexlife package bundlers)"
+
+[dependencies]
+foreplay-ir = { path = "../foreplay-ir" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

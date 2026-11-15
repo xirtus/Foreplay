@@ -1,0 +1,38 @@
+[gd_scene load_steps=4 format=3 uid="uid://c2dplatformer01"]
+
+[ext_resource type="PackedScene" uid="uid://coin01" path="res://coin.tscn" id="1_coin"]
+
+[node name="Level01" type="Node2D"]
+
+[node name="Ground" type="StaticBody2D" parent="." groups=["environment"]]
+position = Vector2(0, 500)
+
+[node name="GroundCollision" type="CollisionShape2D" parent="Ground"]
+position = Vector2(400, 20)
+shape_extent = Vector2(800, 40)
+
+[node name="Player" type="CharacterBody2D" parent="." groups=["player", "kinematics"]]
+position = Vector2(100, 420)
+speed = 300.0
+jump_velocity = -420.0
+gravity = 980.0
+is_grounded = true
+
+[node name="PlayerCollision" type="CollisionShape2D" parent="Player"]
+position = Vector2(0, 0)
+shape_radius = 16.0
+
+[node name="Camera2D" type="Camera2D" parent="Player"]
+zoom = Vector2(2, 2)
+position_smoothing_enabled = true
+
+[node name="CoinItem" parent="." instance=ExtResource("1_coin")]
+position = Vector2(300, 400)
+
+[node name="GoalTrigger" type="Area2D" parent="." groups=["triggers"]]
+position = Vector2(700, 420)
+
+[node name="GoalCollision" type="CollisionShape2D" parent="GoalTrigger"]
+shape_extent = Vector2(32, 64)
+
+[connection signal="body_entered" from="GoalTrigger" to="Player" method="_on_goal_reached"]

@@ -5,13 +5,24 @@
 //! and aggregates receipts across all verifier suites.
 
 use crate::VerificationReceipt;
+use crate::parser_fuzzers::{
+    verify_archive_pak_hostile_suite, verify_fscn_hostile_suite, verify_gdscript_hostile_suite,
+    verify_replay_frame_codec_suite, verify_stick_calibration_suite, verify_tscn_hostile_suite,
+    verify_wav_codec_hostile_suite,
+};
+use crate::wave2b_fuzzers::{
+    verify_1000_frame_physics_differential_gate, verify_fpck_archive_adversarial_suite,
+    verify_gdshader_compiler_adversarial_suite, verify_godot4_200_scene_conformance_gate,
+    verify_project_exporter_bundle_invariants_suite, verify_script_sandbox_termination_suite,
+    verify_tscn_bidirectional_roundtrip_suite,
+};
 use crate::scene_tree_fuzzer::{
     build_sample_tree_scene, verify_bijective_ecs_entities, verify_fscn_emission_stability,
     verify_hierarchy_relations, verify_rebuild_world_equivalence,
 };
 use crate::undo_redo_fuzzer::{
     FuzzOperation, make_test_node, rich_fuzz_strings, run_stateful_fuzz_sequence,
-    sample_adversarial_ir_values,
+    sample_adversarial_ir_values, verify_10k_step_undo_redo_marathon,
 };
 use foreplay_core::SceneTree;
 use foreplay_ir::{IrNode, IrScene, IrValue, NodeId, PhysicsBackend};
@@ -474,9 +485,25 @@ pub fn verify_fscn_emission_suite(cases: usize) -> VerificationReceipt {
 pub fn run_all_adversarial_suites() -> Vec<VerificationReceipt> {
     vec![
         verify_undo_redo_suite(50),
+        verify_10k_step_undo_redo_marathon(),
         verify_scene_tree_relational_suite(50),
+        verify_fscn_emission_suite(50),
+        verify_fscn_hostile_suite(),
+        verify_tscn_hostile_suite(),
+        verify_gdscript_hostile_suite(),
+        verify_replay_frame_codec_suite(),
+        verify_wav_codec_hostile_suite(),
+        verify_archive_pak_hostile_suite(),
+        verify_stick_calibration_suite(),
         verify_frame_differential_verdict_adversarial(),
         verify_physics_hotswap_thrash(1_000),
-        verify_fscn_emission_suite(50),
+        // Wave 2B Suites
+        verify_fpck_archive_adversarial_suite(),
+        verify_gdshader_compiler_adversarial_suite(),
+        verify_script_sandbox_termination_suite(),
+        verify_tscn_bidirectional_roundtrip_suite(),
+        verify_godot4_200_scene_conformance_gate(),
+        verify_1000_frame_physics_differential_gate(),
+        verify_project_exporter_bundle_invariants_suite(),
     ]
 }

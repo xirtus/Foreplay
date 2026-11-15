@@ -9,5 +9,9 @@ description = "Replay-frame multiplayer sync, deterministic input lockstep, and 
 [dependencies]
 foreplay-ir = { path = "../foreplay-ir" }
 
+[[bin]]
+name = "foreplay-server"
+path = "src/bin/foreplay-server.rs"
+
 [lints]
 workspace = true

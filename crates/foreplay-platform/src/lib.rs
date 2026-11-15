@@ -413,6 +413,159 @@ impl SexOsScanoutSurface {
     }
 }
 
+/// Standard keyboard scancodes for cross-platform input mapping.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum KeyCode {
+    KeyA, KeyB, KeyC, KeyD, KeyE, KeyF, KeyG, KeyH, KeyI, KeyJ, KeyK, KeyL, KeyM,
+    KeyN, KeyO, KeyP, KeyQ, KeyR, KeyS, KeyT, KeyU, KeyV, KeyW, KeyX, KeyY, KeyZ,
+    Num0, Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8, Num9,
+    Space, Enter, Escape, Tab, Backspace,
+    ShiftLeft, ShiftRight, ControlLeft, ControlRight, AltLeft, AltRight,
+    ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
+}
+
+/// Real-time frame input state tracker matching Godot 4 `Input.get_vector`,
+/// `is_action_pressed`, `is_action_just_pressed`, and `is_action_just_released`.
+#[derive(Clone, Debug, Default)]
+pub struct InputState {
+    pressed_keys: std::collections::BTreeSet<KeyCode>,
+    just_pressed_keys: std::collections::BTreeSet<KeyCode>,
+    just_released_keys: std::collections::BTreeSet<KeyCode>,
+}
+
+impl InputState {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Mark a key as pressed down.
+    pub fn press_key(&mut self, key: KeyCode) {
+        if self.pressed_keys.insert(key) {
+            self.just_pressed_keys.insert(key);
+        }
+    }
+
+    /// Mark a key as released.
+    pub fn release_key(&mut self, key: KeyCode) {
+        if self.pressed_keys.remove(&key) {
+            self.just_released_keys.insert(key);
+        }
+    }
+
+    /// True if key is currently held down.
+    #[must_use]
+    pub fn is_pressed(&self, key: KeyCode) -> bool {
+        self.pressed_keys.contains(&key)
+    }
+
+    /// True if key was pressed during the current frame step.
+    #[must_use]
+    pub fn is_just_pressed(&self, key: KeyCode) -> bool {
+        self.just_pressed_keys.contains(&key)
+    }
+
+    /// True if key was released during the current frame step.
+    #[must_use]
+    pub fn is_just_released(&self, key: KeyCode) -> bool {
+        self.just_released_keys.contains(&key)
+    }
+
+    /// Complete current frame step, clearing single-frame transition sets.
+    pub fn end_frame(&mut self) {
+        self.just_pressed_keys.clear();
+        self.just_released_keys.clear();
+    }
+
+    /// Godot 4 `Input.get_vector(negative_x, positive_x, negative_y, positive_y)` parity.
+    ///
+    /// Computes directional vector from 4 keys and clamps diagonal length to 1.0.
+    #[must_use]
+    pub fn get_vector(&self, neg_x: KeyCode, pos_x: KeyCode, neg_y: KeyCode, pos_y: KeyCode) -> [f32; 2] {
+        let mut x = 0.0_f32;
+        let mut y = 0.0_f32;
+
+        if self.is_pressed(pos_x) { x += 1.0; }
+        if self.is_pressed(neg_x) { x -= 1.0; }
+        if self.is_pressed(pos_y) { y += 1.0; }
+        if self.is_pressed(neg_y) { y -= 1.0; }
+
+        let len = (x * x + y * y).sqrt();
+        if len > 1.0 {
+            [x / len, y / len]
+        } else {
+            [x, y]
+        }
+    }
+}
+
+/// OS system clipboard interface.
+#[derive(Clone, Debug, Default)]
+pub struct OsClipboard {
+    content: Option<String>,
+}
+
+impl OsClipboard {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn set_text(&mut self, text: String) {
+        self.content = Some(text);
+    }
+
+    #[must_use]
+    pub fn get_text(&self) -> Option<&str> {
+        self.content.as_deref()
+    }
+
+    pub fn clear(&mut self) {
+        self.content = None;
+    }
+}
+
+/// Mouse cursor visibility and lock mode.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum CursorMode {
+    #[default]
+    Visible,
+    Hidden,
+    Captured,
+    Confined,
+}
+
+/// Mouse cursor icon shape.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum CursorShape {
+    #[default]
+    Arrow,
+    IBeam,
+    PointingHand,
+    Crosshair,
+    Wait,
+    ResizeHorizontal,
+    ResizeVertical,
+}
+
+/// OS mouse cursor state tracker.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct CursorState {
+    pub mode: CursorMode,
+    pub shape: CursorShape,
+    pub position: [f32; 2],
+}
+
+impl Default for CursorState {
+    fn default() -> Self {
+        Self {
+            mode: CursorMode::Visible,
+            shape: CursorShape::Arrow,
+            position: [0.0, 0.0],
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -511,5 +664,54 @@ mod tests {
         assert_eq!(surface.width(), 200);
         assert_eq!(surface.height(), 150);
         assert_eq!(surface.pitch(), 200 * 4);
+    }
+
+    #[test]
+    fn input_state_press_release_and_just_pressed() {
+        let mut input = InputState::new();
+        assert!(!input.is_pressed(KeyCode::KeyW));
+        assert!(!input.is_just_pressed(KeyCode::KeyW));
+
+        input.press_key(KeyCode::KeyW);
+        assert!(input.is_pressed(KeyCode::KeyW));
+        assert!(input.is_just_pressed(KeyCode::KeyW));
+
+        input.end_frame();
+        assert!(input.is_pressed(KeyCode::KeyW));
+        assert!(!input.is_just_pressed(KeyCode::KeyW));
+
+        input.release_key(KeyCode::KeyW);
+        assert!(!input.is_pressed(KeyCode::KeyW));
+        assert!(input.is_just_released(KeyCode::KeyW));
+    }
+
+    #[test]
+    fn input_state_get_vector_normalization() {
+        let mut input = InputState::new();
+        // Diagonal: W + D
+        input.press_key(KeyCode::KeyW); // pos_y
+        input.press_key(KeyCode::KeyD); // pos_x
+
+        let vec = input.get_vector(KeyCode::KeyA, KeyCode::KeyD, KeyCode::KeyS, KeyCode::KeyW);
+        let len = (vec[0] * vec[0] + vec[1] * vec[1]).sqrt();
+        assert!((len - 1.0).abs() < 1e-4, "diagonal vector must be clamped to length 1.0");
+        assert!((vec[0] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-4);
+        assert!((vec[1] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-4);
+    }
+
+    #[test]
+    fn os_clipboard_and_cursor_state() {
+        let mut clip = OsClipboard::new();
+        assert_eq!(clip.get_text(), None);
+        clip.set_text("Godot4-Port".into());
+        assert_eq!(clip.get_text(), Some("Godot4-Port"));
+
+        let mut cursor = CursorState::default();
+        assert_eq!(cursor.mode, CursorMode::Visible);
+        assert_eq!(cursor.shape, CursorShape::Arrow);
+        cursor.mode = CursorMode::Captured;
+        cursor.shape = CursorShape::Crosshair;
+        assert_eq!(cursor.mode, CursorMode::Captured);
+        assert_eq!(cursor.shape, CursorShape::Crosshair);
     }
 }

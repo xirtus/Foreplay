@@ -2,10 +2,13 @@
 //!
 //! Features:
 //! - 2D pan and zoom camera canvas.
+//! - Toolbar with Grid Snap and Pixel Snap toggles.
+//! - Godot Control Anchor Preset buttons (Top Left, Center, Full Rect, Top Wide) when a UI node is selected.
+//! - Standard purple 1280×720 reference frame boundary.
 //! - 2D coordinate grid & colored origin axes.
-//! - Bounding boxes and labels for 2D nodes (`Node2D`, `Sprite2D`, etc.).
+//! - Bounding boxes and labels for 2D nodes (`Node2D`, `Sprite2D`, `Control`, etc.).
 //! - Selection highlights and interactive 2D translate handles dispatching `EditorCommand::SetProperty`.
-//! - HUD overlay with active workspace info.
+//! - HUD overlay with zoom and node statistics.
 
 use egui::{
     Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Ui, Vec2,
@@ -14,12 +17,55 @@ use foreplay_ir::{EditorCommand, IrValue};
 use crate::ForeplayEditorApp;
 use crate::theme::{
     COLOR_ACCENT_BLUE, COLOR_AXIS_X, COLOR_AXIS_Y, COLOR_BG_DARK, COLOR_BORDER,
-    COLOR_TEXT_MUTED, COLOR_TEXT_NORMAL, COLOR_WARN_YELLOW,
+    COLOR_SUCCESS_GREEN, COLOR_TEXT_MUTED, COLOR_TEXT_NORMAL, COLOR_WARN_YELLOW,
 };
 
 pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
+    // Top Toolbar
     ui.horizontal(|ui| {
-        ui.label("2D Viewport | Pan: Right-Drag | Zoom: Scroll");
+        // Grid Snap toggle
+        let grid_label = if app.snap_2d_grid { "🧲 Grid Snap (16px): ON" } else { "🧲 Grid Snap: OFF" };
+        let grid_color = if app.snap_2d_grid { COLOR_SUCCESS_GREEN } else { COLOR_TEXT_MUTED };
+        if ui.button(egui::RichText::new(grid_label).color(grid_color)).clicked() {
+            app.snap_2d_grid = !app.snap_2d_grid;
+        }
+
+        // Pixel Snap toggle
+        let pixel_label = if app.snap_2d_pixel { "🔲 Pixel Snap: ON" } else { "🔲 Pixel Snap: OFF" };
+        let pixel_color = if app.snap_2d_pixel { COLOR_SUCCESS_GREEN } else { COLOR_TEXT_MUTED };
+        if ui.button(egui::RichText::new(pixel_label).color(pixel_color)).clicked() {
+            app.snap_2d_pixel = !app.snap_2d_pixel;
+        }
+
+        ui.separator();
+
+        // Control UI Anchor Presets if selected node is a Control node
+        let selected_control = app.selected_node.and_then(|id| {
+            let n = app.session.tree.active_scene.nodes.get(&id)?;
+            if n.class_name.contains("Control") || n.class_name.contains("HUD") || n.class_name.contains("Label") || n.class_name.contains("Button") {
+                Some((id, n.clone()))
+            } else {
+                None
+            }
+        });
+
+        if let Some((selected_id, node)) = selected_control {
+            ui.label("Anchors:");
+            if ui.button("Top-Left").on_hover_text("Position (0, 0), Size (200, 50)").clicked() {
+                apply_anchor_preset(app, selected_id, &node, Vec2::new(0.0, 0.0), Vec2::new(200.0, 50.0));
+            }
+            if ui.button("Center").on_hover_text("Position (540, 335), Size (200, 50)").clicked() {
+                apply_anchor_preset(app, selected_id, &node, Vec2::new(540.0, 335.0), Vec2::new(200.0, 50.0));
+            }
+            if ui.button("Full Rect").on_hover_text("Position (0, 0), Size (1280, 720)").clicked() {
+                apply_anchor_preset(app, selected_id, &node, Vec2::new(0.0, 0.0), Vec2::new(1280.0, 720.0));
+            }
+            if ui.button("Top Wide").on_hover_text("Position (0, 0), Size (1280, 60)").clicked() {
+                apply_anchor_preset(app, selected_id, &node, Vec2::new(0.0, 0.0), Vec2::new(1280.0, 60.0));
+            }
+            ui.separator();
+        }
+
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.button("⟲ Reset 2D View").clicked() {
                 app.camera_2d = Default::default();
@@ -47,7 +93,21 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
     // 1. Draw 2D Grid
     draw_2d_grid(&painter, rect, app.camera_2d.pan, app.camera_2d.zoom);
 
-    // 2. Draw 2D Origin Axes
+    // 2. Draw 1280×720 Viewport Boundary Frame (purple outline)
+    let p_min = app.camera_2d.to_screen(Vec2::ZERO, rect);
+    let p_max = app.camera_2d.to_screen(Vec2::new(1280.0, 720.0), rect);
+    let frame_rect = Rect::from_two_pos(p_min, p_max);
+    let purple_color = Color32::from_rgb(180, 100, 240);
+    painter.rect_stroke(frame_rect, 0.0, Stroke::new(1.8, purple_color), egui::StrokeKind::Inside);
+    painter.text(
+        frame_rect.left_top() + Vec2::new(8.0, 8.0),
+        Align2::LEFT_TOP,
+        "1280×720 Viewport Reference",
+        FontId::proportional(11.0),
+        purple_color,
+    );
+
+    // 3. Draw 2D Origin Axes
     let origin_screen = app.camera_2d.to_screen(Vec2::ZERO, rect);
     painter.line_segment(
         [origin_screen, origin_screen + Vec2::new(60.0, 0.0)],
@@ -73,11 +133,11 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
         COLOR_AXIS_Y,
     );
 
-    // 3. Draw 2D Nodes
+    // 4. Draw 2D Nodes
     let nodes = app.session.tree.active_scene.nodes.clone();
     for (&node_id, node) in &nodes {
         let pos = get_vec2_prop(node, "position").unwrap_or(Vec2::ZERO);
-        let scale = get_vec2_prop(node, "scale").unwrap_or(Vec2::ONE);
+        let scale = get_vec2_prop(node, "scale").unwrap_or(Vec2::new(1.0, 1.0));
         let is_selected = app.selected_node == Some(node_id);
 
         let screen_center = app.camera_2d.to_screen(pos, rect);
@@ -109,7 +169,16 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
             let delta = response.drag_delta();
             if delta.length_sq() > 0.0 {
                 let world_delta = Vec2::new(delta.x / app.camera_2d.zoom, delta.y / app.camera_2d.zoom);
-                let new_pos = pos + world_delta;
+                let mut new_pos = pos + world_delta;
+
+                if app.snap_2d_grid {
+                    new_pos.x = (new_pos.x / 16.0).round() * 16.0;
+                    new_pos.y = (new_pos.y / 16.0).round() * 16.0;
+                } else if app.snap_2d_pixel {
+                    new_pos.x = new_pos.x.round();
+                    new_pos.y = new_pos.y.round();
+                }
+
                 let cmd = EditorCommand::SetProperty {
                     node_id,
                     key: "position".into(),
@@ -121,8 +190,8 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
         }
     }
 
-    // 4. HUD overlay
-    let hud_rect = Rect::from_min_size(rect.min + Vec2::new(12.0, 12.0), Vec2::new(210.0, 50.0));
+    // 5. HUD overlay
+    let hud_rect = Rect::from_min_size(rect.min + Vec2::new(12.0, 12.0), Vec2::new(220.0, 56.0));
     painter.rect_filled(hud_rect, 4.0, Color32::from_rgba_unmultiplied(26, 29, 36, 220));
     painter.rect_stroke(hud_rect, 4.0, Stroke::new(1.0, COLOR_BORDER), egui::StrokeKind::Inside);
     painter.text(
@@ -132,13 +201,39 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
         FontId::proportional(12.0),
         COLOR_ACCENT_BLUE,
     );
+    let snap_status = if app.snap_2d_grid { "Grid 16px" } else if app.snap_2d_pixel { "Pixel" } else { "Off" };
     painter.text(
-        hud_rect.min + Vec2::new(8.0, 26.0),
+        hud_rect.min + Vec2::new(8.0, 28.0),
         Align2::LEFT_TOP,
-        format!("Zoom: {:.1}x | Nodes: {}", app.camera_2d.zoom, nodes.len()),
+        format!("Zoom: {:.1}x | Snap: {snap_status} | Nodes: {}", app.camera_2d.zoom, nodes.len()),
         FontId::proportional(11.0),
         COLOR_TEXT_MUTED,
     );
+}
+
+fn apply_anchor_preset(
+    app: &mut ForeplayEditorApp,
+    node_id: foreplay_ir::NodeId,
+    node: &foreplay_ir::IrNode,
+    new_pos: Vec2,
+    new_scale: Vec2,
+) {
+    let old_pos = get_vec2_prop(node, "position").unwrap_or(Vec2::ZERO);
+    let old_scale = get_vec2_prop(node, "scale").unwrap_or(Vec2::ONE);
+
+    app.execute_command(EditorCommand::SetProperty {
+        node_id,
+        key: "position".into(),
+        old_value: Some(IrValue::Vec2([old_pos.x, old_pos.y])),
+        new_value: Some(IrValue::Vec2([new_pos.x, new_pos.y])),
+    });
+
+    app.execute_command(EditorCommand::SetProperty {
+        node_id,
+        key: "scale".into(),
+        old_value: Some(IrValue::Vec2([old_scale.x, old_scale.y])),
+        new_value: Some(IrValue::Vec2([new_scale.x, new_scale.y])),
+    });
 }
 
 fn draw_2d_grid(painter: &egui::Painter, rect: Rect, pan: Vec2, zoom: f32) {

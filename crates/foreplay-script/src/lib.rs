@@ -3,6 +3,9 @@
 //! Provides script attachment registry, hot-reload revision tracking, exported property
 //! synchronization with `foreplay_ir::IrNode`, and the `QuickJsBridgeSpec` for TypeScript/JS bindings.
 
+pub mod ts_eval;
+pub use ts_eval::{JsEvalError, JsExecutionResult, QuickJsComponentRunner};
+
 use foreplay_ir::{IrNode, IrValue, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

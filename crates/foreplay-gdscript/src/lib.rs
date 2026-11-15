@@ -3,6 +3,10 @@
 //!
 //! Mirrors `GDScriptParser` (`modules/gdscript/gdscript_parser.cpp`).
 
+pub mod vm;
+
+pub use vm::{GdVm, VmError, VmExecutionResult};
+
 use foreplay_ir::{FeelSpecKnob, IrValue};
 use serde::{Deserialize, Serialize};
 
@@ -588,5 +592,21 @@ func _on_trick_landed(trick_name: String, score: int):
         assert!(module.feel_knobs.iter().any(|k| k.key == "grind_balance_damping"));
         assert!(module.signals.iter().any(|s| s.name == "trick_landed"));
         assert!(module.signals.iter().any(|s| s.name == "bailed"));
+    }
+
+    #[test]
+    fn parses_starter_template_player_2d_gd_end_to_end() {
+        let gd_src = include_str!("../../../templates/2d-platformer/player_2d.gd");
+        let module = parse_gdscript(gd_src).expect("2d platformer .gd parse must succeed");
+        assert_eq!(module.class_name.as_deref(), Some("Player2DController"));
+        assert_eq!(module.extends, "CharacterBody2D");
+        assert_eq!(module.feel_knobs.len(), 4);
+        assert!(module.feel_knobs.iter().any(|k| k.key == "speed"));
+        assert!(module.feel_knobs.iter().any(|k| k.key == "jump_velocity"));
+        assert!(module.feel_knobs.iter().any(|k| k.key == "gravity"));
+        assert!(module.feel_knobs.iter().any(|k| k.key == "coyote_time"));
+        assert!(module.signals.iter().any(|s| s.name == "jumped"));
+        assert!(module.signals.iter().any(|s| s.name == "landed"));
+        assert!(module.signals.iter().any(|s| s.name == "goal_reached"));
     }
 }

@@ -2,10 +2,12 @@
 //!
 //! Features:
 //! - Orbit / Pan / Zoom 3D perspective camera (projected onto `egui::Painter`).
+//! - Top Toolbar: Q (Select), W (Move), E (Rotate), R (Scale), Local/Global space,
+//!   🧲 Snap toggle (0.5m / 15°), View Mode dropdown, Preview Camera3D toggle.
+//! - Top-right 3D Orientation Gizmo (+X, -X, +Y, -Y, +Z, -Z click snapping).
 //! - 3D ground plane grid & colored X/Y/Z origin axes.
-//! - Wireframe 3D bounding boxes for every node in `active_scene.nodes`.
-//! - Selection highlights with node identification labels.
-//! - Interactive Translate (`W`) and Scale (`R`) 3D Gizmos dispatching `EditorCommand::SetProperty`.
+//! - Wireframe & styled 3D bounding boxes for every node in `active_scene.nodes`.
+//! - Interactive Translate, Rotate, and Scale Gizmos dispatching `EditorCommand::SetProperty`.
 //! - HUD overlay with live FPS, node count, tick count, workspace, and PIE state.
 
 use bevy_math::Vec3;
@@ -20,31 +22,76 @@ use crate::theme::{
     COLOR_SUCCESS_GREEN, COLOR_TEXT_MUTED, COLOR_TEXT_NORMAL, COLOR_WARN_YELLOW,
 };
 
+/// 3D Viewport rendering mode.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ViewMode3D {
+    LitNormal,
+    Unshaded,
+    Wireframe,
+    Overdraw,
+    Collision,
+}
+
 pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
-    // Mode toolbar at the top of the viewport
+    // 1. Top Viewport Toolbar
     ui.horizontal(|ui| {
-        ui.label("Gizmo Mode:");
-        if ui
-            .selectable_label(app.gizmo_mode == GizmoMode::Select, "🔍 Select [Q]")
-            .clicked()
-        {
+        // Gizmo Mode buttons
+        if ui.selectable_label(app.gizmo_mode == GizmoMode::Select, "🔍 Select [Q]").clicked() {
             app.gizmo_mode = GizmoMode::Select;
         }
-        if ui
-            .selectable_label(app.gizmo_mode == GizmoMode::Translate, "✥ Translate [W]")
-            .clicked()
-        {
+        if ui.selectable_label(app.gizmo_mode == GizmoMode::Translate, "✥ Move [W]").clicked() {
             app.gizmo_mode = GizmoMode::Translate;
         }
-        if ui
-            .selectable_label(app.gizmo_mode == GizmoMode::Scale, "⤢ Scale [R]")
-            .clicked()
-        {
+        if ui.selectable_label(app.gizmo_mode == GizmoMode::Rotate, "⟳ Rotate [E]").clicked() {
+            app.gizmo_mode = GizmoMode::Rotate;
+        }
+        if ui.selectable_label(app.gizmo_mode == GizmoMode::Scale, "⤢ Scale [R]").clicked() {
             app.gizmo_mode = GizmoMode::Scale;
         }
 
         ui.separator();
-        ui.label(RichTextHelper::muted("Right-Drag: Orbit | Shift+Right-Drag: Pan | Scroll: Zoom"));
+
+        // Local / Global coordinate space toggle
+        let space_label = if app.is_local_transform { "📦 Local" } else { "🌐 Global" };
+        if ui.button(space_label).on_hover_text("Toggle between Local and Global transform space").clicked() {
+            app.is_local_transform = !app.is_local_transform;
+        }
+
+        // Snap toggle
+        let snap_label = if app.snap_enabled {
+            "🧲 Snap ON (0.5m / 15°)"
+        } else {
+            "🧲 Snap OFF"
+        };
+        let snap_color = if app.snap_enabled { COLOR_SUCCESS_GREEN } else { COLOR_TEXT_MUTED };
+        if ui.button(egui::RichText::new(snap_label).color(snap_color)).on_hover_text("Toggle grid and angle snapping").clicked() {
+            app.snap_enabled = !app.snap_enabled;
+        }
+
+        ui.separator();
+
+        // View Mode dropdown
+        egui::ComboBox::from_id_salt("view_mode_3d_combo")
+            .selected_text(match app.view_mode_3d {
+                ViewMode3D::LitNormal => "Lit Normal",
+                ViewMode3D::Unshaded => "Unshaded",
+                ViewMode3D::Wireframe => "Wireframe",
+                ViewMode3D::Overdraw => "Overdraw",
+                ViewMode3D::Collision => "Collision Shapes",
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut app.view_mode_3d, ViewMode3D::LitNormal, "Lit Normal");
+                ui.selectable_value(&mut app.view_mode_3d, ViewMode3D::Unshaded, "Unshaded");
+                ui.selectable_value(&mut app.view_mode_3d, ViewMode3D::Wireframe, "Wireframe");
+                ui.selectable_value(&mut app.view_mode_3d, ViewMode3D::Overdraw, "Overdraw");
+                ui.selectable_value(&mut app.view_mode_3d, ViewMode3D::Collision, "Collision Shapes");
+            });
+
+        // Preview Camera3D toggle
+        let cam_preview_label = if app.preview_camera { "🎥 Camera: Active" } else { "🎥 Preview Camera" };
+        if ui.selectable_label(app.preview_camera, cam_preview_label).clicked() {
+            app.preview_camera = !app.preview_camera;
+        }
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.button("⟲ Reset Camera").clicked() {
@@ -60,6 +107,9 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
     if ui.input(|i| i.key_pressed(Key::W)) {
         app.gizmo_mode = GizmoMode::Translate;
     }
+    if ui.input(|i| i.key_pressed(Key::E)) {
+        app.gizmo_mode = GizmoMode::Rotate;
+    }
     if ui.input(|i| i.key_pressed(Key::R)) {
         app.gizmo_mode = GizmoMode::Scale;
     }
@@ -69,7 +119,11 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
     let painter = ui.painter_at(rect);
 
     // Draw background
-    painter.rect_filled(rect, 0.0, COLOR_BG_DARK);
+    let bg_color = match app.view_mode_3d {
+        ViewMode3D::Overdraw => Color32::from_rgb(0x0a, 0x0c, 0x10),
+        _ => COLOR_BG_DARK,
+    };
+    painter.rect_filled(rect, 0.0, bg_color);
 
     // Handle Camera Controls
     let input = ui.input(|i| i.clone());
@@ -87,19 +141,21 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
     }
 
     // 1. Draw 3D Ground Grid (Y = 0)
-    draw_ground_grid(&painter, &app.camera_3d, rect);
+    if app.view_mode_3d != ViewMode3D::Overdraw {
+        draw_ground_grid(&painter, &app.camera_3d, rect);
+    }
 
     // 2. Draw 3D World Origin Axes (X: red, Y: green, Z: blue)
     draw_origin_axes(&painter, &app.camera_3d, rect);
 
-    // 3. Draw Wireframe 3D Bounding Boxes for every node
+    // 3. Draw Wireframe / Styled 3D Bounding Boxes for every node
     let nodes = app.session.tree.active_scene.nodes.clone();
     for (&node_id, node) in &nodes {
         let pos = get_vec3_prop(node, "position").unwrap_or(Vec3::ZERO);
         let scale = get_vec3_prop(node, "scale").unwrap_or(Vec3::ONE);
         let is_selected = app.selected_node == Some(node_id);
 
-        draw_node_wireframe_box(&painter, &app.camera_3d, rect, pos, scale, &node.name, is_selected);
+        draw_node_box(&painter, &app.camera_3d, rect, pos, scale, &node.name, is_selected, app.view_mode_3d, &node.class_name);
     }
 
     // 4. Draw & Interact with Gizmo for selected node
@@ -110,7 +166,10 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
         handle_gizmo_interaction(app, rect, &response, &painter, selected_id, node);
     }
 
-    // 5. Draw HUD stats overlay
+    // 5. Draw 3D Orientation Gizmo Widget in top-right corner
+    draw_orientation_gizmo(&painter, rect, &mut app.camera_3d, &response);
+
+    // 6. Draw HUD stats overlay
     draw_hud_overlay(&painter, rect, app);
 }
 
@@ -165,7 +224,8 @@ fn draw_origin_axes(painter: &egui::Painter, camera: &crate::camera::Camera3D, r
     }
 }
 
-fn draw_node_wireframe_box(
+#[allow(clippy::too_many_arguments)]
+fn draw_node_box(
     painter: &egui::Painter,
     camera: &crate::camera::Camera3D,
     rect: Rect,
@@ -173,6 +233,8 @@ fn draw_node_wireframe_box(
     scale: Vec3,
     name: &str,
     is_selected: bool,
+    view_mode: ViewMode3D,
+    class_name: &str,
 ) {
     let hx = (scale.x * 0.5).max(0.1);
     let hy = (scale.y * 0.5).max(0.1);
@@ -195,10 +257,15 @@ fn draw_node_wireframe_box(
         screen_pts[i] = camera.project(v[i], rect);
     }
 
-    let stroke = if is_selected {
-        Stroke::new(2.2, COLOR_WARN_YELLOW)
-    } else {
-        Stroke::new(1.0, Color32::from_rgb(100, 150, 190))
+    let stroke = match view_mode {
+        ViewMode3D::Collision if class_name.contains("Body") || class_name.contains("Collision") => {
+            Stroke::new(2.0, Color32::from_rgb(0x4e, 0xc9, 0xb0))
+        }
+        ViewMode3D::Overdraw => {
+            Stroke::new(1.5, Color32::from_rgba_unmultiplied(255, 120, 60, 160))
+        }
+        _ if is_selected => Stroke::new(2.2, COLOR_WARN_YELLOW),
+        _ => Stroke::new(1.0, Color32::from_rgb(100, 150, 190)),
     };
 
     // 12 edges
@@ -214,7 +281,7 @@ fn draw_node_wireframe_box(
         }
     }
 
-    // Draw name tag above the box
+    // Name tag above the box
     if let Some(top_center_2d) = camera.project(pos + Vec3::new(0.0, hy + 0.3, 0.0), rect) {
         let tag_color = if is_selected {
             COLOR_WARN_YELLOW
@@ -241,6 +308,7 @@ fn handle_gizmo_interaction(
 ) {
     let pos = get_vec3_prop(node, "position").unwrap_or(Vec3::ZERO);
     let scale = get_vec3_prop(node, "scale").unwrap_or(Vec3::ONE);
+    let rot = get_vec3_prop(node, "rotation").unwrap_or(Vec3::ZERO);
 
     let Some(origin_2d) = app.camera_3d.project(pos, rect) else {
         return;
@@ -253,32 +321,40 @@ fn handle_gizmo_interaction(
 
     let is_translating = app.gizmo_mode == GizmoMode::Translate;
     let is_scaling = app.gizmo_mode == GizmoMode::Scale;
+    let is_rotating = app.gizmo_mode == GizmoMode::Rotate;
 
-    // Draw gizmo lines and handles
-    if let Some(x_2d) = x_pt {
-        painter.line_segment([origin_2d, x_2d], Stroke::new(3.0, COLOR_AXIS_X));
-        if is_translating {
-            painter.circle_filled(x_2d, 6.0, COLOR_AXIS_X);
-        } else if is_scaling {
-            painter.rect_filled(Rect::from_center_size(x_2d, Vec2::splat(10.0)), 1.0, COLOR_AXIS_X);
+    if is_rotating {
+        // Draw 3 orthogonal rotation rings
+        draw_rotation_ring(painter, &app.camera_3d, rect, pos, axis_len, GizmoAxis::X, COLOR_AXIS_X);
+        draw_rotation_ring(painter, &app.camera_3d, rect, pos, axis_len, GizmoAxis::Y, COLOR_AXIS_Y);
+        draw_rotation_ring(painter, &app.camera_3d, rect, pos, axis_len, GizmoAxis::Z, COLOR_AXIS_Z);
+    } else {
+        // Draw translation/scale lines and handles
+        if let Some(x_2d) = x_pt {
+            painter.line_segment([origin_2d, x_2d], Stroke::new(3.0, COLOR_AXIS_X));
+            if is_translating {
+                painter.circle_filled(x_2d, 6.0, COLOR_AXIS_X);
+            } else if is_scaling {
+                painter.rect_filled(Rect::from_center_size(x_2d, Vec2::splat(10.0)), 1.0, COLOR_AXIS_X);
+            }
         }
-    }
 
-    if let Some(y_2d) = y_pt {
-        painter.line_segment([origin_2d, y_2d], Stroke::new(3.0, COLOR_AXIS_Y));
-        if is_translating {
-            painter.circle_filled(y_2d, 6.0, COLOR_AXIS_Y);
-        } else if is_scaling {
-            painter.rect_filled(Rect::from_center_size(y_2d, Vec2::splat(10.0)), 1.0, COLOR_AXIS_Y);
+        if let Some(y_2d) = y_pt {
+            painter.line_segment([origin_2d, y_2d], Stroke::new(3.0, COLOR_AXIS_Y));
+            if is_translating {
+                painter.circle_filled(y_2d, 6.0, COLOR_AXIS_Y);
+            } else if is_scaling {
+                painter.rect_filled(Rect::from_center_size(y_2d, Vec2::splat(10.0)), 1.0, COLOR_AXIS_Y);
+            }
         }
-    }
 
-    if let Some(z_2d) = z_pt {
-        painter.line_segment([origin_2d, z_2d], Stroke::new(3.0, COLOR_AXIS_Z));
-        if is_translating {
-            painter.circle_filled(z_2d, 6.0, COLOR_AXIS_Z);
-        } else if is_scaling {
-            painter.rect_filled(Rect::from_center_size(z_2d, Vec2::splat(10.0)), 1.0, COLOR_AXIS_Z);
+        if let Some(z_2d) = z_pt {
+            painter.line_segment([origin_2d, z_2d], Stroke::new(3.0, COLOR_AXIS_Z));
+            if is_translating {
+                painter.circle_filled(z_2d, 6.0, COLOR_AXIS_Z);
+            } else if is_scaling {
+                painter.rect_filled(Rect::from_center_size(z_2d, Vec2::splat(10.0)), 1.0, COLOR_AXIS_Z);
+            }
         }
     }
 
@@ -288,7 +364,6 @@ fn handle_gizmo_interaction(
         if delta.length_sq() > 0.0 {
             let pointer_pos = response.hover_pos().unwrap_or(origin_2d);
 
-            // Determine which axis is closest to the drag or handle
             let dist_x = x_pt.map_or(f32::MAX, |p| p.distance(pointer_pos));
             let dist_y = y_pt.map_or(f32::MAX, |p| p.distance(pointer_pos));
             let dist_z = z_pt.map_or(f32::MAX, |p| p.distance(pointer_pos));
@@ -312,11 +387,42 @@ fn handle_gizmo_interaction(
                     GizmoAxis::None => {}
                 }
 
+                if app.snap_enabled {
+                    let snap = app.snap_step_translate;
+                    new_pos.x = (new_pos.x / snap).round() * snap;
+                    new_pos.y = (new_pos.y / snap).round() * snap;
+                    new_pos.z = (new_pos.z / snap).round() * snap;
+                }
+
                 let cmd = EditorCommand::SetProperty {
                     node_id,
                     key: "position".into(),
                     old_value: Some(IrValue::Vec3([pos.x, pos.y, pos.z])),
                     new_value: Some(IrValue::Vec3([new_pos.x, new_pos.y, new_pos.z])),
+                };
+                app.execute_command(cmd);
+            } else if is_rotating {
+                let mut new_rot = rot;
+                let angle_delta = (delta.x - delta.y) * 0.02;
+                match chosen_axis {
+                    GizmoAxis::X => new_rot.x += angle_delta,
+                    GizmoAxis::Y => new_rot.y += angle_delta,
+                    GizmoAxis::Z => new_rot.z += angle_delta,
+                    GizmoAxis::None => {}
+                }
+
+                if app.snap_enabled {
+                    let snap_rad = app.snap_step_rotate_deg.to_radians();
+                    new_rot.x = (new_rot.x / snap_rad).round() * snap_rad;
+                    new_rot.y = (new_rot.y / snap_rad).round() * snap_rad;
+                    new_rot.z = (new_rot.z / snap_rad).round() * snap_rad;
+                }
+
+                let cmd = EditorCommand::SetProperty {
+                    node_id,
+                    key: "rotation".into(),
+                    old_value: Some(IrValue::Vec3([rot.x, rot.y, rot.z])),
+                    new_value: Some(IrValue::Vec3([new_rot.x, new_rot.y, new_rot.z])),
                 };
                 app.execute_command(cmd);
             } else if is_scaling {
@@ -340,8 +446,101 @@ fn handle_gizmo_interaction(
     }
 }
 
+fn draw_rotation_ring(
+    painter: &egui::Painter,
+    camera: &crate::camera::Camera3D,
+    rect: Rect,
+    center: Vec3,
+    radius: f32,
+    axis: GizmoAxis,
+    color: Color32,
+) {
+    let segments = 24;
+    let step = std::f32::consts::TAU / segments as f32;
+    let mut prev_pt: Option<Pos2> = None;
+
+    for i in 0..=segments {
+        let angle = i as f32 * step;
+        let pt = match axis {
+            GizmoAxis::X => center + Vec3::new(0.0, angle.cos() * radius, angle.sin() * radius),
+            GizmoAxis::Y => center + Vec3::new(angle.cos() * radius, 0.0, angle.sin() * radius),
+            GizmoAxis::Z => center + Vec3::new(angle.cos() * radius, angle.sin() * radius, 0.0),
+            GizmoAxis::None => center,
+        };
+
+        if let Some(screen_pt) = camera.project(pt, rect) {
+            if let Some(prev) = prev_pt {
+                painter.line_segment([prev, screen_pt], Stroke::new(2.5, color));
+            }
+            prev_pt = Some(screen_pt);
+        } else {
+            prev_pt = None;
+        }
+    }
+}
+
+fn draw_orientation_gizmo(
+    painter: &egui::Painter,
+    rect: Rect,
+    camera: &mut crate::camera::Camera3D,
+    response: &egui::Response,
+) {
+    let gizmo_size = 80.0;
+    let gizmo_rect = Rect::from_min_size(
+        Pos2::new(rect.max.x - gizmo_size - 14.0, rect.min.y + 14.0),
+        Vec2::splat(gizmo_size),
+    );
+
+    painter.rect_filled(gizmo_rect, 6.0, Color32::from_rgba_unmultiplied(22, 25, 32, 210));
+    painter.rect_stroke(gizmo_rect, 6.0, Stroke::new(1.0, COLOR_BORDER), egui::StrokeKind::Inside);
+
+    let center = gizmo_rect.center();
+    let arm_len = 26.0;
+
+    let cam_fwd = camera.forward();
+    let cam_right = camera.right();
+    let cam_up = camera.up();
+
+    let axes = [
+        (Vec3::X, "X", COLOR_AXIS_X, 0.0, 0.0),
+        (-Vec3::X, "-X", Color32::from_rgb(180, 70, 70), std::f32::consts::PI, 0.0),
+        (Vec3::Y, "Y", COLOR_AXIS_Y, 0.0, 1.45),
+        (-Vec3::Y, "-Y", Color32::from_rgb(70, 180, 70), 0.0, -1.45),
+        (Vec3::Z, "Z", COLOR_AXIS_Z, std::f32::consts::FRAC_PI_2, 0.0),
+        (-Vec3::Z, "-Z", Color32::from_rgb(70, 70, 180), -std::f32::consts::FRAC_PI_2, 0.0),
+    ];
+
+    let mouse_pos = response.hover_pos();
+    let clicked = response.clicked_by(PointerButton::Primary);
+
+    for (dir, label, color, yaw, pitch) in axes {
+        let sx = dir.dot(cam_right) * arm_len;
+        let sy = -dir.dot(cam_up) * arm_len;
+        let depth = dir.dot(cam_fwd);
+
+        let pt = center + Vec2::new(sx, sy);
+        let alpha = if depth > 0.0 { 255 } else { 120 };
+        let draw_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha);
+
+        painter.line_segment([center, pt], Stroke::new(2.0, draw_color));
+        let handle_rect = Rect::from_center_size(pt, Vec2::splat(14.0));
+        painter.circle_filled(pt, 6.0, draw_color);
+
+        if let Some(mp) = mouse_pos
+            && handle_rect.contains(mp)
+            && clicked
+        {
+            camera.align_cardinal(yaw, pitch);
+        }
+
+        if depth >= -0.2 {
+            painter.text(pt, Align2::CENTER_CENTER, label, FontId::proportional(9.0), Color32::WHITE);
+        }
+    }
+}
+
 fn draw_hud_overlay(painter: &egui::Painter, rect: Rect, app: &ForeplayEditorApp) {
-    let hud_rect = Rect::from_min_size(rect.min + Vec2::new(12.0, 12.0), Vec2::new(260.0, 95.0));
+    let hud_rect = Rect::from_min_size(rect.min + Vec2::new(12.0, 12.0), Vec2::new(280.0, 100.0));
     painter.rect_filled(hud_rect, 4.0, Color32::from_rgba_unmultiplied(26, 29, 36, 220));
     painter.rect_stroke(hud_rect, 4.0, Stroke::new(1.0, COLOR_BORDER), egui::StrokeKind::Inside);
 
@@ -391,10 +590,11 @@ fn draw_hud_overlay(painter: &egui::Painter, rect: Rect, app: &ForeplayEditorApp
     );
     text_y += 16.0;
 
+    let snap_str = if app.snap_enabled { "ON" } else { "OFF" };
     painter.text(
         Pos2::new(text_x, text_y),
         Align2::LEFT_TOP,
-        format!("Gizmo: {:?} (W: Translate, R: Scale, Q: Select)", app.gizmo_mode),
+        format!("Mode: {:?} | Snap: {snap_str} | View: {:?}", app.gizmo_mode, app.view_mode_3d),
         FontId::proportional(10.0),
         COLOR_WARN_YELLOW,
     );
@@ -404,12 +604,5 @@ fn get_vec3_prop(node: &foreplay_ir::IrNode, key: &str) -> Option<Vec3> {
     match node.properties.get(key) {
         Some(IrValue::Vec3(v)) => Some(Vec3::new(v[0], v[1], v[2])),
         _ => None,
-    }
-}
-
-struct RichTextHelper;
-impl RichTextHelper {
-    fn muted(text: &str) -> egui::RichText {
-        egui::RichText::new(text).color(COLOR_TEXT_MUTED)
     }
 }
