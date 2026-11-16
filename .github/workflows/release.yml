@@ -1,0 +1,74 @@
+name: Release Mac & Linux
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    name: macOS Universal2 (.app + .dmg + .zip)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - name: Build macOS Universal2 Release
+        run: bash scripts/package-macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: foreplay-macos-universal
+          path: |
+            dist/macos/*.dmg
+            dist/macos/*.zip
+
+  linux-x86_64:
+    name: Linux x86_64 / SteamOS (.tar.gz + .deb)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux Audio, Gamepad & Graphics Dev Headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - name: Build Linux x86_64 Release
+        env:
+          FOREPLAY_LINUX_ARCHS: x86_64
+        run: bash scripts/package-linux.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: foreplay-linux-x86_64
+          path: |
+            dist/linux/*linux-x86_64.tar.gz
+            dist/linux/*_amd64.deb
+
+  linux-arm64:
+    name: Linux ARM64 (.tar.gz + .deb)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux Audio, Gamepad & Graphics Dev Headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+      - name: Build Linux ARM64 Release
+        env:
+          FOREPLAY_LINUX_ARCHS: arm64
+        run: bash scripts/package-linux.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: foreplay-linux-arm64
+          path: |
+            dist/linux/*linux-arm64.tar.gz
+            dist/linux/*_arm64.deb

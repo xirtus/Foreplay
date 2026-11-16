@@ -48,6 +48,12 @@ cargo run -p foreplay-harness -- mcp-stdio
 
 # Run dedicated headless multiplayer server self-test
 cargo run -p foreplay-net --bin foreplay-server -- --self-test
+
+# Build native macOS Universal2 (arm64 + x86_64) Foreplay.app, .dmg & .zip in dist/macos/
+bash scripts/package-macos.sh
+
+# Build native Linux x86_64 (SteamOS / Desktop) & ARM64 .tar.gz AppDirs and .deb packages in dist/linux/
+bash scripts/package-linux.sh
 ```
 
 ## Key Documents
