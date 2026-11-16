@@ -13,6 +13,10 @@
 use crate::debug_ipc::{
     DebugCommand, DebugEvent, DebugIpcError, DebugIpcServer, DebugNodeSummary,
 };
+use crate::polyamour_runtime::{
+    hot_rebuild_node_collider, pack_node_id, parse_parametric_modifiers, unpack_node_id,
+    LivePolyamourNodeState, LivePolyamourStats, PolyamourRuntimeError,
+};
 use bevy_math::{Mat4, Vec3};
 use foreplay_audio::{AudioRingBuffer, CpalAudioDriver};
 use foreplay_core::classdb::ClassDb;
@@ -24,6 +28,10 @@ use foreplay_physics::{
     BodyType, CharacterBody3DController, RapierSpace3D, RigidBodyConfig3D, ShapeConfig3D,
 };
 use foreplay_platform::{GilrsGamepadBridge, InputServer};
+use foreplay_polyamour::{
+    apply_mesh_delta, compile_polyamour_game_bundle, evaluate_modifier_stack, LiveLinkError,
+    PolyLinkMessage, PolyMesh, PolyamourLiveLinkServer,
+};
 use foreplay_render::{
     HardwareDrawItem3D, HardwareFrameOutput, HardwareLight3D, HardwareLightType,
     PerspectiveCamera3D, RenderHardwareError, WgpuRenderDevice,
@@ -79,11 +87,13 @@ pub struct PlayerRuntime {
     pub input_server: InputServer,
     pub gamepad_bridge: GilrsGamepadBridge,
     pub gdext_host: GdExtensionHost,
+    pub live_polyamour_meshes: BTreeMap<NodeId, LivePolyamourNodeState>,
 
     node_scripts: BTreeMap<u64, NodeScriptBinding>,
     feel_knobs: BTreeMap<String, f64>,
     active_breakpoints: BTreeSet<(String, usize)>,
     debug_server: Option<DebugIpcServer>,
+    polyamour_server: Option<PolyamourLiveLinkServer>,
 
     tick_count: u64,
     paused: bool,
@@ -102,6 +112,8 @@ impl std::fmt::Debug for PlayerRuntime {
             .field("feel_knobs_count", &self.feel_knobs.len())
             .field("breakpoints_count", &self.active_breakpoints.len())
             .field("debug_server_active", &self.debug_server.is_some())
+            .field("polyamour_server_active", &self.polyamour_server.is_some())
+            .field("live_polyamour_meshes_count", &self.live_polyamour_meshes.len())
             .finish()
     }
 }
@@ -253,6 +265,8 @@ impl PlayerRuntime {
             feel_knobs,
             active_breakpoints: BTreeSet::new(),
             debug_server: None,
+            live_polyamour_meshes: BTreeMap::new(),
+            polyamour_server: None,
             tick_count: 0,
             paused: false,
             should_exit: false,
@@ -452,6 +466,7 @@ impl PlayerRuntime {
     /// Advances the engine by one frame with delta time `dt` seconds.
     pub fn step_frame(&mut self, dt: f32) -> PlayerTickSummary {
         self.poll_debug_ipc();
+        self.poll_polyamour_live_link();
 
         if self.paused {
             return PlayerTickSummary {
@@ -730,6 +745,223 @@ impl PlayerRuntime {
             }
         }
         None
+    }
+
+    /// Binds the Polyamour Live-Link TCP server to `addr` (e.g. `"127.0.0.1:0"`).
+    pub fn bind_polyamour_live_link(&mut self, addr: &str) -> Result<SocketAddr, LiveLinkError> {
+        let server = PolyamourLiveLinkServer::bind(addr)?;
+        let local_addr = server.local_addr()?;
+        self.polyamour_server = Some(server);
+        Ok(local_addr)
+    }
+
+    /// Read-only reference to live Polyamour mesh states.
+    #[must_use]
+    pub fn live_polyamour_meshes(&self) -> &BTreeMap<NodeId, LivePolyamourNodeState> {
+        &self.live_polyamour_meshes
+    }
+
+    /// Mutable reference to live Polyamour mesh states.
+    pub fn live_polyamour_meshes_mut(&mut self) -> &mut BTreeMap<NodeId, LivePolyamourNodeState> {
+        &mut self.live_polyamour_meshes
+    }
+
+    /// Resolves a 64-bit integer into a scene `NodeId`, matching packed ID or raw index.
+    #[must_use]
+    pub fn resolve_node_id(&self, packed_or_raw: u64) -> NodeId {
+        for &id in self.scene_tree.active_scene.nodes.keys() {
+            if pack_node_id(id) == packed_or_raw {
+                return id;
+            }
+        }
+        for &id in self.scene_tree.active_scene.nodes.keys() {
+            if id.index as u64 == packed_or_raw {
+                return id;
+            }
+        }
+        unpack_node_id(packed_or_raw)
+    }
+
+    /// Polls incoming messages from connected Polyamour Live-Link clients, applying mesh deltas,
+    /// hot-rebuilding colliders, and broadcasting acknowledgments.
+    pub fn poll_polyamour_live_link(&mut self) -> usize {
+        let Some(mut server) = self.polyamour_server.take() else {
+            return 0;
+        };
+
+        let messages = server.poll_messages();
+        let count = messages.len();
+
+        for msg in messages {
+            match msg {
+                PolyLinkMessage::MeshDeltaSync {
+                    node_id,
+                    revision,
+                    updated_vertices,
+                    replaced_faces,
+                    edge_tags,
+                    face_tags,
+                } => {
+                    let target_id = self.resolve_node_id(node_id);
+
+                    let state = self.live_polyamour_meshes.entry(target_id).or_insert_with(|| {
+                        LivePolyamourNodeState::new(target_id, PolyMesh::new())
+                    });
+
+                    let delta_msg = PolyLinkMessage::MeshDeltaSync {
+                        node_id,
+                        revision,
+                        updated_vertices,
+                        replaced_faces,
+                        edge_tags: edge_tags.clone(),
+                        face_tags: face_tags.clone(),
+                    };
+                    apply_mesh_delta(&mut state.mesh, &delta_msg);
+
+                    for (edge, tag) in edge_tags {
+                        state.attributes.tag_edge(edge, tag);
+                    }
+                    for (face, tag) in face_tags {
+                        state.attributes.tag_face(face, tag);
+                    }
+
+                    state.compiled_bundle =
+                        compile_polyamour_game_bundle(&state.mesh, &state.attributes);
+                    state.revision = revision;
+
+                    let tri = state.mesh.triangulate();
+                    if let Some(node) = self.scene_tree.active_scene.nodes.get_mut(&target_id) {
+                        node.properties.insert(
+                            "mesh_vertex_count".into(),
+                            IrValue::I64(state.mesh.positions.len() as i64),
+                        );
+                        node.properties.insert(
+                            "mesh_triangle_count".into(),
+                            IrValue::I64((tri.indices.len() / 3) as i64),
+                        );
+                        node.properties.insert(
+                            "mesh_positions".into(),
+                            IrValue::Array(
+                                tri.positions
+                                    .iter()
+                                    .flat_map(|p| [IrValue::F64(p.x as f64), IrValue::F64(p.y as f64), IrValue::F64(p.z as f64)])
+                                    .collect(),
+                            ),
+                        );
+                    }
+
+                    hot_rebuild_node_collider(&mut self.physics_space, target_id, state);
+
+                    let _ = server.broadcast(&PolyLinkMessage::Ack { revision });
+                }
+                PolyLinkMessage::OpenMeshInPolyamour {
+                    node_id,
+                    mesh,
+                    ..
+                } => {
+                    let target_id = self.resolve_node_id(node_id);
+                    let poly_mesh = mesh.to_mesh();
+                    let mut state = LivePolyamourNodeState::new(target_id, poly_mesh);
+                    state.compiled_bundle =
+                        compile_polyamour_game_bundle(&state.mesh, &state.attributes);
+
+                    hot_rebuild_node_collider(&mut self.physics_space, target_id, &state);
+                    self.live_polyamour_meshes.insert(target_id, state);
+
+                    let _ = server.broadcast(&PolyLinkMessage::Ack { revision: 0 });
+                }
+                _ => {}
+            }
+        }
+
+        self.polyamour_server = Some(server);
+        count
+    }
+
+    /// Polls Polyamour Live-Link server until at least one message is received or `timeout` expires.
+    pub fn poll_polyamour_live_link_timeout(&mut self, timeout: std::time::Duration) -> usize {
+        let start = std::time::Instant::now();
+        let mut total = 0;
+        loop {
+            let n = self.poll_polyamour_live_link();
+            total += n;
+            if total > 0 || start.elapsed() >= timeout {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        total
+    }
+
+    /// Evaluates runtime parametric modifiers and shape key morph targets on a live Polyamour node,
+    /// re-evaluates semantic attributes, and hot-updates physics colliders in-place.
+    pub fn update_parametric_polyamour_node(
+        &mut self,
+        node_id: NodeId,
+        ops_v2: Option<&str>,
+        morph_weights: &BTreeMap<String, f32>,
+    ) -> Result<LivePolyamourStats, PolyamourRuntimeError> {
+        let state = self
+            .live_polyamour_meshes
+            .get_mut(&node_id)
+            .ok_or(PolyamourRuntimeError::NodeNotFound(node_id))?;
+
+        let mut evaluated_mesh = state.base_mesh.clone();
+
+        if !morph_weights.is_empty()
+            && let Some(ref shape_keys) = state.shape_keys
+        {
+            let blended_positions = shape_keys.evaluate_blended_positions(morph_weights);
+            if blended_positions.len() == evaluated_mesh.positions.len() {
+                evaluated_mesh.positions = blended_positions;
+            }
+        }
+
+        if let Some(script) = ops_v2 {
+            let modifiers = parse_parametric_modifiers(script);
+            evaluated_mesh = evaluate_modifier_stack(&evaluated_mesh, &modifiers);
+        }
+
+        state.mesh = evaluated_mesh;
+        state.revision += 1;
+        state.compiled_bundle =
+            compile_polyamour_game_bundle(&state.mesh, &state.attributes);
+
+        let tri = state.mesh.triangulate();
+        if let Some(node) = self.scene_tree.active_scene.nodes.get_mut(&node_id) {
+            node.properties.insert(
+                "mesh_vertex_count".into(),
+                IrValue::I64(state.mesh.positions.len() as i64),
+            );
+            node.properties.insert(
+                "mesh_triangle_count".into(),
+                IrValue::I64((tri.indices.len() / 3) as i64),
+            );
+            node.properties.insert(
+                "mesh_positions".into(),
+                IrValue::Array(
+                    tri.positions
+                        .iter()
+                        .flat_map(|p| [IrValue::F64(p.x as f64), IrValue::F64(p.y as f64), IrValue::F64(p.z as f64)])
+                        .collect(),
+                ),
+            );
+        }
+
+        hot_rebuild_node_collider(&mut self.physics_space, node_id, state);
+
+        let stats = LivePolyamourStats {
+            node_id,
+            vertex_count: state.mesh.positions.len(),
+            face_count: state.mesh.faces.len(),
+            triangle_count: tri.indices.len() / 3,
+            grind_spline_count: state.compiled_bundle.grind_rail_splines.len(),
+            has_trimesh_collider: !state.compiled_bundle.trimesh_collider.0.is_empty(),
+            has_convex_collider: !state.compiled_bundle.convex_hull_points.is_empty(),
+            revision: state.revision,
+        };
+
+        Ok(stats)
     }
 }
 

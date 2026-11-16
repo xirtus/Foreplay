@@ -23,6 +23,10 @@ pub enum ExportTarget {
 }
 
 impl ExportTarget {
+    /// Alias for WebGPU / WebAssembly target (`WebGpuBrowserUrl`).
+    #[allow(non_upper_case_globals)]
+    pub const WebGpuWasm: ExportTarget = ExportTarget::WebGpuBrowserUrl;
+
     pub fn all() -> &'static [ExportTarget] {
         &[
             Self::LinuxSteamDeckX64,
@@ -246,51 +250,8 @@ impl ProjectExporter {
 
             ExportTarget::WebGpuBrowserUrl => {
                 primary_artifact = "index.html".into();
-                bundle_files.insert("game.fpck".into(), archive_bytes.clone());
-
-                let html = format!(
-                    "<!DOCTYPE html>\n\
-                    <html lang=\"en\">\n\
-                    <head>\n\
-                        <meta charset=\"UTF-8\" />\n\
-                        <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n\
-                        <title>{}</title>\n\
-                        <link rel=\"manifest\" href=\"manifest.json\" />\n\
-                        <style>\n\
-                            body {{ margin: 0; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }}\n\
-                            canvas {{ width: 100%; height: 100%; display: block; }}\n\
-                        </style>\n\
-                    </head>\n\
-                    <body>\n\
-                        <canvas id=\"foreplay-canvas\"></canvas>\n\
-                        <script src=\"foreplay_runtime.js\"></script>\n\
-                        <script>\n\
-                            window.addEventListener('load', async () => {{\n\
-                                await ForeplayRuntime.init({{ canvas: document.getElementById('foreplay-canvas'), archive: 'game.fpck' }});\n\
-                            }});\n\
-                        </script>\n\
-                    </body>\n\
-                    </html>\n",
-                    config.game_title
-                );
-                bundle_files.insert("index.html".into(), html.into_bytes());
-
-                let manifest = format!(
-                    "{{\n\
-                        \"name\": \"{}\",\n\
-                        \"short_name\": \"{}\",\n\
-                        \"start_url\": \".\",\n\
-                        \"display\": \"fullscreen\",\n\
-                        \"theme_color\": \"#000000\",\n\
-                        \"background_color\": \"#000000\"\n\
-                    }}\n",
-                    config.game_title, config.game_title
-                );
-                bundle_files.insert("manifest.json".into(), manifest.into_bytes());
-
-                let runtime_js = "// Foreplay WebGPU runtime loader\n\
-                    const ForeplayRuntime = { init: async (cfg) => { console.log('Initialized Foreplay WebGPU', cfg); } };\n";
-                bundle_files.insert("foreplay_runtime.js".into(), runtime_js.as_bytes().to_vec());
+                let wasm_bundle = crate::wasm_webgpu::WasmWebGpuPackager::generate_bundle(config, &archive_bytes);
+                bundle_files.extend(wasm_bundle);
             }
 
             ExportTarget::SexOsPackage => {
@@ -479,6 +440,10 @@ mod tests {
                     assert!(out.bundle_files.contains_key("index.html"));
                     assert!(out.bundle_files.contains_key("manifest.json"));
                     assert!(out.bundle_files.contains_key("foreplay_runtime.js"));
+                    assert!(out.bundle_files.contains_key("foreplay_player_bg.wasm"));
+                    assert!(out.bundle_files.contains_key("foreplay_wasm_loader.js"));
+                    assert!(out.bundle_files.contains_key("sw.js"));
+                    assert!(out.bundle_files.contains_key("manifest.webmanifest"));
                 }
                 ExportTarget::SexOsPackage => {
                     assert!(out.primary_artifact.ends_with(".sexpkg"));
@@ -581,5 +546,21 @@ mod tests {
         assert!(unpacked.contains_key("scripts/skater.gd"));
 
         let _ = std::fs::remove_file(&temp_exe);
+    }
+
+    #[test]
+    fn webgpu_wasm_export_contains_valid_wasm_custom_section() {
+        let cfg = test_config();
+        let out = ProjectExporter::export_project(&cfg, ExportTarget::WebGpuWasm).unwrap();
+        let wasm_bytes = out.bundle_files.get("foreplay_player_bg.wasm").expect("wasm binary present");
+        let unpacked = crate::wasm_webgpu::extract_and_verify_wasm_fpck_section(wasm_bytes).expect("wasm custom section verification succeeds");
+        assert!(unpacked.contains_key("scenes/main.tscn"));
+        assert!(unpacked.contains_key("scripts/skater.gd"));
+        assert!(unpacked.contains_key("project.foreplay"));
+    }
+
+    #[test]
+    fn webgpu_wasm_target_alias_identity() {
+        assert_eq!(ExportTarget::WebGpuWasm, ExportTarget::WebGpuBrowserUrl);
     }
 }

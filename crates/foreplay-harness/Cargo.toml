@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "GPL-3.0-only"
-description = "3JSE-style AI Agent API / MCP server, Undo/Redo journal, and 8-Gate headless verification harness"
+description = "3JSE-style AI Agent API / MCP server, Undo/Redo journal, and 10-Gate headless verification harness"
 
 [dependencies]
 foreplay-ir = { path = "../foreplay-ir" }
@@ -15,6 +15,7 @@ foreplay-audio = { path = "../foreplay-audio" }
 foreplay-platform = { path = "../foreplay-platform" }
 foreplay-atlas = { path = "../foreplay-atlas" }
 foreplay-porthost = { path = "../foreplay-porthost" }
+foreplay-polyamour = { path = "../foreplay-polyamour" }
 foreplay-gdscript = { path = "../foreplay-gdscript" }
 foreplay-gdext = { path = "../foreplay-gdext" }
 foreplay-script = { path = "../foreplay-script" }

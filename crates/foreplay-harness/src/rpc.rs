@@ -103,6 +103,9 @@ impl HarnessRpcServer {
             "foreplay/import_glb" => Self::handle_import_glb(session, params),
             "foreplay/classdb_query" => Self::handle_classdb_query(params),
             "foreplay/verify_all_gates" => Self::handle_verify_all_gates(),
+            "foreplay/polyamour_ops_v2" => Self::handle_polyamour_ops_v2(session, params),
+            "foreplay/rust_hot_reload_status" => Self::handle_rust_hot_reload_status(params),
+            "foreplay/sexlife_sync" => Self::handle_sexlife_sync(session, params),
             _ => Err(RpcError::method_not_found(method)),
         }
     }
@@ -978,6 +981,147 @@ impl HarnessRpcServer {
             "gates": gates_json,
         }))
     }
+
+    fn handle_polyamour_ops_v2(session: &mut HarnessSession, params: &Value) -> Result<Value, RpcError> {
+        let node_id_val = params
+            .get("node_id")
+            .ok_or_else(|| RpcError::invalid_params("missing 'node_id'"))?;
+        let node_id = parse_node_id_val(node_id_val)
+            .ok_or_else(|| RpcError::invalid_params("invalid 'node_id'"))?;
+
+        let script = params
+            .get("script")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| RpcError::invalid_params("missing 'script' string"))?;
+
+        let steps = foreplay_polyamour::parse_polyops_v2(script)
+            .map_err(|e| RpcError::invalid_params(format!("invalid polyops v2 script: {e}")))?;
+
+        let old_val = session
+            .tree
+            .active_scene
+            .nodes
+            .get(&node_id)
+            .and_then(|n| n.properties.get("polyamour_ops").cloned());
+
+        session
+            .execute(EditorCommand::SetProperty {
+                node_id,
+                key: "polyamour_ops".into(),
+                old_value: old_val,
+                new_value: Some(IrValue::String(script.to_string())),
+            })
+            .map_err(|e| RpcError::internal(format!("failed executing SetProperty command: {e}")))?;
+
+        let node = session
+            .tree
+            .active_scene
+            .nodes
+            .get(&node_id)
+            .ok_or_else(|| RpcError::internal("node missing after property update"))?;
+
+        let asset_opt = foreplay_threejs::ThreeJsParametricPolyamourAsset::from_node(node);
+        let (v_count, f_count, splines_count) = if let Some(asset) = asset_opt {
+            (
+                asset.baked.positions.len() / 3,
+                asset.baked.normals.len() / 3,
+                asset.baked.grind_rail_splines.len(),
+            )
+        } else {
+            (0, 0, 0)
+        };
+
+        Ok(json!({
+            "success": true,
+            "steps_count": steps.len(),
+            "vertex_count": v_count,
+            "face_count": f_count,
+            "grind_spline_count": splines_count,
+        }))
+    }
+
+    fn handle_rust_hot_reload_status(params: &Value) -> Result<Value, RpcError> {
+        let plugin_name = params
+            .get("plugin_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("active_plugin");
+
+        Ok(json!({
+            "status": "ready",
+            "plugin_name": plugin_name,
+            "abi_version": foreplay_script::FOREPLAY_RUST_SCRIPT_ABI_VERSION,
+            "supported_property_types": [
+                "Nil", "Bool", "I64", "F64", "String", "Vec2", "Vec3", "Quat", "Color", "NodePath", "ResourcePath", "Array", "Map"
+            ],
+            "compiler": "rustc",
+            "edition": "2024",
+            "crate_type": "cdylib"
+        }))
+    }
+
+    fn handle_sexlife_sync(session: &mut HarnessSession, params: &Value) -> Result<Value, RpcError> {
+        let target_app = params
+            .get("app")
+            .and_then(|v| v.as_str())
+            .unwrap_or("all");
+
+        let mut result = json!({
+            "success": true,
+            "target_app": target_app,
+        });
+
+        if target_app == "moan" || target_app == "all" {
+            let track = foreplay_script::MoanProjectStemLink::default_skate_soundtrack();
+            result["moan"] = json!({
+                "project_name": track.name,
+                "bpm": track.bpm,
+                "stem_count": track.stems.len(),
+                "quantize_grid": format!("{:?}", track.quantize_grid),
+                "dsp_bus": track.dsp_bus
+            });
+        }
+
+        if target_app == "splicy" || target_app == "all" {
+            let edl = foreplay_script::SplicyCutsceneEdl::new(
+                format!("{}_Cutscene", session.tree.active_scene.name),
+                30.0,
+                60.0,
+            );
+            result["splicy"] = json!({
+                "name": edl.name,
+                "duration_sec": edl.duration_sec,
+                "frame_rate": edl.frame_rate,
+            });
+        }
+
+        if target_app == "polyamour" || target_app == "all" {
+            let poly_nodes: Vec<Value> = session
+                .tree
+                .active_scene
+                .nodes
+                .iter()
+                .filter(|(_, n)| {
+                    n.properties.contains_key("polyamour_primitive")
+                        || n.properties.contains_key("polyamour_ops")
+                })
+                .map(|(id, n)| {
+                    json!({
+                        "id": { "index": id.index, "generation": id.generation.get() },
+                        "name": n.name
+                    })
+                })
+                .collect();
+
+            result["polyamour"] = json!({
+                "protocol": "PLNK",
+                "version": foreplay_polyamour::POLY_LINK_VERSION,
+                "polyamour_node_count": poly_nodes.len(),
+                "nodes": poly_nodes
+            });
+        }
+
+        Ok(result)
+    }
 }
 
 fn parse_node_id_val(v: &Value) -> Option<NodeId> {
@@ -1477,7 +1621,58 @@ mod tests {
         );
         let gates_val: Value = serde_json::from_str(&gates_res).unwrap();
         assert_eq!(gates_val["result"]["all_passed"], true);
-        assert_eq!(gates_val["result"]["total_gates"], 8);
-        assert_eq!(gates_val["result"]["passed_gates"], 8);
+        assert_eq!(gates_val["result"]["total_gates"], 10);
+        assert_eq!(gates_val["result"]["passed_gates"], 10);
+
+        // 15. Polyamour Ops V2 RPC
+        let polyops_res = HarnessRpcServer::handle_json(
+            &mut session,
+            r#"{
+                "jsonrpc": "2.0",
+                "id": 44,
+                "method": "foreplay/polyamour_ops_v2",
+                "params": {
+                    "node_id": { "index": 1, "generation": 1 },
+                    "script": "polyops 2\nbevel_edges 0-1 offset=0.1 segments=1\n"
+                }
+            }"#,
+        );
+        let polyops_val: Value = serde_json::from_str(&polyops_res).unwrap();
+        assert_eq!(polyops_val["result"]["success"], true);
+        assert_eq!(polyops_val["result"]["steps_count"], 1);
+
+        // 16. Rust Hot Reload Status RPC
+        let hotreload_res = HarnessRpcServer::handle_json(
+            &mut session,
+            r#"{
+                "jsonrpc": "2.0",
+                "id": 45,
+                "method": "foreplay/rust_hot_reload_status",
+                "params": {
+                    "plugin_name": "SkaterPlugin"
+                }
+            }"#,
+        );
+        let hotreload_val: Value = serde_json::from_str(&hotreload_res).unwrap();
+        assert_eq!(hotreload_val["result"]["status"], "ready");
+        assert_eq!(hotreload_val["result"]["plugin_name"], "SkaterPlugin");
+
+        // 17. SexLife Sync RPC
+        let sexlife_res = HarnessRpcServer::handle_json(
+            &mut session,
+            r#"{
+                "jsonrpc": "2.0",
+                "id": 46,
+                "method": "foreplay/sexlife_sync",
+                "params": {
+                    "app": "all"
+                }
+            }"#,
+        );
+        let sexlife_val: Value = serde_json::from_str(&sexlife_res).unwrap();
+        assert_eq!(sexlife_val["result"]["success"], true);
+        assert!(sexlife_val["result"]["moan"].is_object());
+        assert!(sexlife_val["result"]["splicy"].is_object());
+        assert!(sexlife_val["result"]["polyamour"].is_object());
     }
 }

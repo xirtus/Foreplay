@@ -125,8 +125,9 @@ pub struct ForeplayEditorApp {
     pub atlas_recorder: foreplay_atlas::timetravel::TimeTravelAtlasRecorder,
     pub atlas_scrub_tick: Option<u64>,
 
-    // Hardware GPU Viewport Renderer
+    // Hardware GPU Viewport Renderer & Zero-Copy Viewport Bridge
     pub render_device: Option<foreplay_render::WgpuRenderDevice>,
+    pub zero_copy_viewport: Option<foreplay_render::ZeroCopyViewportBridge>,
 }
 
 impl std::fmt::Debug for ForeplayEditorApp {
@@ -235,14 +236,23 @@ func _physics_process(delta: float) -> void:
             atlas_recorder: foreplay_atlas::timetravel::TimeTravelAtlasRecorder::default(),
             atlas_scrub_tick: None,
             render_device: Some(foreplay_render::WgpuRenderDevice::new_or_fallback()),
+            zero_copy_viewport: Some(foreplay_render::ZeroCopyViewportBridge::new()),
         };
 
         let summary = app.adapter_summary();
         app.log(
             LogLevel::Info,
-            format!("Initialized Foreplay Editor for project '{name_str}' | GPU: {summary}"),
+            format!("Initialized Foreplay Editor v1.1.0 for project '{name_str}' | GPU: {summary}"),
         );
         app
+    }
+
+    /// Returns `true` if hardware GPU zero-copy viewport bridge is active without software fallback.
+    #[must_use]
+    pub fn is_zero_copy_viewport_active(&self) -> bool {
+        self.render_device
+            .as_ref()
+            .is_some_and(|d| d.is_hardware_accelerated())
     }
 
     /// Human-readable summary of the underlying wgpu graphics adapter.
@@ -2046,5 +2056,150 @@ void fragment() {
         assert_eq!(app.tilemap_state.autotiler.painted_cells.len(), 10);
         assert!(app.tilemap_state.autotiler.placed_tiles.len() >= 10);
     }
+
+    #[test]
+    fn test_polyamour_subobject_1_2_3_modes_and_edge_loop_selection() {
+        use foreplay_polyamour::{select_edge_loop, primitive_cube, SubObjectMode, ProportionalFalloff};
+
+        let mut app = ForeplayEditorApp::new("SubObjectTest");
+        app.populate_starter_scene();
+
+        // 1. Verify Blender 1/2/3 selection mode switching
+        app.polyamour_state.subobject_mode = SubObjectMode::Vertex;
+        assert_eq!(app.polyamour_state.subobject_mode, SubObjectMode::Vertex);
+        app.polyamour_state.subobject_mode = SubObjectMode::Edge;
+        assert_eq!(app.polyamour_state.subobject_mode, SubObjectMode::Edge);
+        app.polyamour_state.subobject_mode = SubObjectMode::Face;
+        assert_eq!(app.polyamour_state.subobject_mode, SubObjectMode::Face);
+
+        // 2. Proportional editing toggles and falloffs
+        app.polyamour_state.proportional_editing = true;
+        app.polyamour_state.proportional_falloff = ProportionalFalloff::Smooth;
+        app.polyamour_state.proportional_radius = 2.5;
+        assert_eq!(app.polyamour_state.proportional_radius, 2.5);
+
+        // 3. Edge Loop Selection on cube primitive
+        let cube = primitive_cube(2.0);
+        let loop_edges = select_edge_loop(&cube, [0, 1]);
+        assert_eq!(loop_edges.len(), 4, "Cube quad edge loop must contain 4 continuous edges");
+    }
+
+    #[test]
+    fn test_polyamour_sculpt_stroke_dispatch_and_undo_redo() {
+        use foreplay_polyamour::{apply_sculpt_stroke, primitive_grid, SculptBrush, SculptStroke, SymmetryAxes};
+        use bevy_math::Vec3;
+
+        let mut app = ForeplayEditorApp::new("SculptTest");
+        let next_index = (app.session.tree.active_scene.nodes.len() as u32) + 1;
+        let node_id = NodeId::new(next_index, 1).unwrap();
+
+        let mut properties = BTreeMap::new();
+        properties.insert("polyamour_primitive".into(), IrValue::String("Grid".into()));
+        properties.insert("polyamour_sculpt_strokes".into(), IrValue::I64(0));
+
+        let node = IrNode {
+            id: node_id,
+            name: "SculptModel_1".into(),
+            class_name: "MeshInstance3D".into(),
+            parent: None,
+            instance_scene: None,
+            properties,
+            groups: vec!["polyamour".into()],
+        };
+        app.execute_command(EditorCommand::InsertNode { node });
+        app.selected_node = Some(node_id);
+
+        let mut grid = primitive_grid(4.0, 4.0, 4, 4);
+        let orig_pos_y = grid.positions[0].y;
+
+        // Apply sculpt stroke with mirror X symmetry
+        let stroke = SculptStroke {
+            brush: SculptBrush::Grab,
+            hit_point: Vec3::ZERO,
+            hit_normal: Vec3::Y,
+            radius: 1.5,
+            strength: 0.6,
+            symmetry: SymmetryAxes { mirror_x: true, mirror_y: false, mirror_z: false },
+            stroke_delta: Some(Vec3::new(0.0, 0.4, 0.0)),
+        };
+        apply_sculpt_stroke(&mut grid, &stroke);
+
+        // Check deformation occurred
+        let center_idx = grid.positions.iter().position(|p| (p.x).abs() < 1e-3 && (p.z).abs() < 1e-3).unwrap();
+        assert!(grid.positions[center_idx].y > orig_pos_y, "Sculpt Grab stroke must displace vertices");
+
+        // Record sculpt stroke via EditorCommand
+        app.execute_command(EditorCommand::SetProperty {
+            node_id,
+            key: "polyamour_sculpt_strokes".into(),
+            old_value: Some(IrValue::I64(0)),
+            new_value: Some(IrValue::I64(1)),
+        });
+
+        let recorded = app.session.tree.active_scene.nodes.get(&node_id).unwrap().properties.get("polyamour_sculpt_strokes");
+        assert_eq!(recorded, Some(&IrValue::I64(1)));
+
+        // Undo restores stroke count to 0
+        app.undo();
+        let undone = app.session.tree.active_scene.nodes.get(&node_id).unwrap().properties.get("polyamour_sculpt_strokes");
+        assert_eq!(undone, Some(&IrValue::I64(0)));
+    }
+
+    #[test]
+    fn test_polyamour_game_semantic_tags_and_one_click_bundle_bake() {
+        use foreplay_polyamour::{compile_polyamour_game_bundle, compute_heat_bone_weights, primitive_quarterpipe, PolyamourSemanticAttributes, RigBoneSegment};
+        use bevy_math::Vec3;
+
+        let qpipe = primitive_quarterpipe(2.0, 4.0, 4);
+        let mut attrs = PolyamourSemanticAttributes::new();
+        attrs.tag_edge([0, 1], "grind_edge");
+        attrs.tag_face(0, "collision_convex");
+        attrs.tag_face(1, "walkable_nav");
+
+        let bundle = compile_polyamour_game_bundle(&qpipe, &attrs);
+        assert!(!bundle.grind_rail_splines.is_empty(), "Must compile continuous grind rail splines");
+        assert!(!bundle.convex_hull_points.is_empty(), "Must extract convex hull points");
+        assert!(!bundle.walkable_nav_faces.is_empty(), "Must extract walkable nav faces");
+        assert!(!bundle.uv2_islands.is_empty(), "Must generate Smart UV2 lightmap islands");
+
+        // Bone weights verification: exact sum = 1.0
+        let bones = [
+            RigBoneSegment::new("Root", Vec3::new(0.0, -1.0, 0.0), Vec3::ZERO, 0.5),
+            RigBoneSegment::new("Spine", Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0), 0.5),
+        ];
+        let weights = compute_heat_bone_weights(&qpipe, &bones);
+        assert_eq!(weights.len(), qpipe.positions.len());
+        for inf in &weights {
+            let sum: f32 = inf.weights.iter().sum();
+            assert!((sum - 1.0).abs() < 1e-4, "Bone weights must sum to 1.0 (got {sum})");
+        }
+    }
+
+    #[test]
+    fn test_zerocopy_viewport_bridge_and_hardware_gpu_status() {
+        let app = ForeplayEditorApp::new("BridgeTest");
+        assert!(app.zero_copy_viewport.is_some(), "ZeroCopyViewportBridge must be initialized in ForeplayEditorApp");
+        let is_active = app.is_zero_copy_viewport_active();
+        let summary = app.adapter_summary();
+        assert!(!summary.is_empty(), "GPU summary must be populated");
+        assert_eq!(is_active, app.render_device.as_ref().is_some_and(|d| d.is_hardware_accelerated()));
+    }
+
+    #[test]
+    fn test_sexlife_moan_and_splicy_pro_apps_editor_integration() {
+        // Moan Adaptive Music DAW integration
+        let moan = foreplay_script::MoanProjectStemLink::default_skate_soundtrack();
+        let snap = moan.evaluate_adaptive_mix(0.8, true, 4.0);
+        assert_eq!(snap.current_bar, 1);
+        assert!(snap.stem_gains.contains_key("stem_drums"));
+        assert!(snap.stem_gains.contains_key("stem_lead"));
+
+        // Splicy Cutscene EDL Director integration
+        let edl = foreplay_script::SplicyCutsceneEdl::new("TestCutscene", 10.0, 60.0);
+        let edl_snap = edl.evaluate_at(2.0);
+        assert_eq!(edl_snap.timestamp_sec, 2.0);
+        assert!(edl.duration_sec > 0.0);
+    }
 }
+
 

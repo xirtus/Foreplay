@@ -152,7 +152,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if launch_gui {
         println!(
-            "Launching Foreplay Game Engine v1.0.0 Desktop Studio IDE ({}/{})...",
+            "Launching Foreplay Game Engine v1.1.0 Desktop Studio IDE ({}/{})...",
             env::consts::OS,
             env::consts::ARCH
         );
@@ -163,17 +163,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .with_inner_size([1440.0, 900.0])
                 .with_min_inner_size([960.0, 600.0])
                 .with_icon(icon)
-                .with_title("Foreplay Game Engine — v1.0.0 (Studio Obsidian & Chroma Pro IDE)"),
+                .with_title("Foreplay Game Engine — v1.1.0 (Studio Obsidian & Chroma Pro IDE)"),
             ..Default::default()
         };
 
         eframe::run_native(
-            "Foreplay Game Engine — v1.0.0",
+            "Foreplay Game Engine — v1.1.0",
             native_options,
             Box::new(|_cc| Ok(Box::new(app))),
         )?;
     } else {
-        println!("Foreplay Game Engine Editor v1.0.0 (Headless Smoke Verification)");
+        println!("Foreplay Game Engine Editor v1.1.0 (Headless Smoke Verification)");
         println!(
             "Project: '{}' | Nodes: {}",
             app.session.tree.active_scene.name,

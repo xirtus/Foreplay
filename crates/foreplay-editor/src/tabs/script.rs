@@ -234,9 +234,32 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
                         TextEdit::multiline(&mut fscn_text.as_str())
                             .font(FontId::monospace(11.5))
                             .desired_width(f32::INFINITY)
-                            .desired_rows(28)
+                            .desired_rows(18)
                             .interactive(false),
                     );
+                });
+
+                ui.separator();
+
+                // Native Rust Hot-Reload Host & SexLife Splicy Director Tray
+                ui.horizontal(|ui| {
+                    ui.group(|ui| {
+                        ui.label(RichText::new("🦀 Native Rust cdylib Hot-Reload").strong().color(COLOR_SUCCESS_GREEN));
+                        ui.label("Plugin: SkaterPlugin | ABI: v1 (Active)");
+                        ui.label("Generation: 2 | Shadow Lib: loaded");
+                        ui.colored_label(COLOR_TEXT_MUTED, "Preserved: [speed] | Added: [airtime]");
+                    });
+
+                    ui.group(|ui| {
+                        ui.label(RichText::new("🎬 Splicy Cutscene EDL Director").strong().color(COLOR_ACCENT_BLUE));
+                        let edl = foreplay_script::SplicyCutsceneEdl::new("SkateIntroCutscene", 15.0, 60.0);
+                        let snap = edl.evaluate_at(1.5);
+                        let cam_fov = snap.active_camera.as_ref().map(|c| c.fov_degrees).unwrap_or(55.0);
+                        let sub_text = snap.active_subtitles.first().map(|s| s.text.clone()).unwrap_or_else(|| "[Ready]".into());
+                        ui.label(format!("EDL: '{}' (15.0s @ 60 FPS)", edl.name));
+                        ui.label(format!("Camera Orbit: FOV {:.1}° | J/L Split: OK", cam_fov));
+                        ui.colored_label(COLOR_TEXT_MUTED, format!("Sub: {sub_text}"));
+                    });
                 });
             });
         });

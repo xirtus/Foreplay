@@ -2,6 +2,7 @@
 
 pub mod debug_ipc;
 pub mod embedded_pack;
+pub mod polyamour_runtime;
 pub mod runtime;
 
 pub use debug_ipc::{
@@ -11,6 +12,10 @@ pub use embedded_pack::{
     detect_current_exe_embedded_pack, embed_pack_trailer, extract_embedded_pack_from_bytes,
     extract_embedded_pack_from_path, fnv1a_64, EmbeddedPackError, EMBEDDED_TRAILER_MAGIC_PREFIX,
     EMBEDDED_TRAILER_MAGIC_SUFFIX, EMBEDDED_TRAILER_SIZE,
+};
+pub use polyamour_runtime::{
+    hot_rebuild_node_collider, pack_node_id, parse_parametric_modifiers, unpack_node_id,
+    LivePolyamourNodeState, LivePolyamourStats, PolyamourRuntimeError,
 };
 pub use runtime::{PlayerRuntime, PlayerTickSummary};
 

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-VERSION="${FOREPLAY_VERSION:-1.0.0}"
+VERSION="${FOREPLAY_VERSION:-1.1.0}"
 DIST_DIR="$ROOT_DIR/dist/linux"
 ICON_DIR="$ROOT_DIR/dist/icons"
 mkdir -p "$DIST_DIR"

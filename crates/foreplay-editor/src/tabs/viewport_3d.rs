@@ -573,7 +573,7 @@ fn draw_orientation_gizmo(
 }
 
 fn draw_hud_overlay(painter: &egui::Painter, rect: Rect, app: &ForeplayEditorApp) {
-    let hud_rect = Rect::from_min_size(rect.min + Vec2::new(12.0, 12.0), Vec2::new(280.0, 100.0));
+    let hud_rect = Rect::from_min_size(rect.min + Vec2::new(12.0, 12.0), Vec2::new(280.0, 116.0));
     painter.rect_filled(hud_rect, 4.0, Color32::from_rgba_unmultiplied(26, 29, 36, 220));
     painter.rect_stroke(hud_rect, 4.0, Stroke::new(1.0, COLOR_BORDER), egui::StrokeKind::Inside);
 
@@ -640,6 +640,20 @@ fn draw_hud_overlay(painter: &egui::Painter, rect: Rect, app: &ForeplayEditorApp
         format!("GPU: {adapter_summary}"),
         FontId::proportional(9.5),
         COLOR_TEXT_MUTED,
+    );
+    text_y += 14.0;
+
+    let bridge_status = if app.is_zero_copy_viewport_active() {
+        "ZeroCopyBridge: Hardware wgpu RGBA8 ✓"
+    } else {
+        "ZeroCopyBridge: Painter Fallback"
+    };
+    painter.text(
+        Pos2::new(text_x, text_y),
+        Align2::LEFT_TOP,
+        bridge_status,
+        FontId::proportional(9.0),
+        COLOR_SUCCESS_GREEN,
     );
 }
 

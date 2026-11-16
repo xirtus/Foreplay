@@ -7,6 +7,7 @@ pub mod parser_fuzzers;
 pub mod scene_tree_fuzzer;
 pub mod subsystem_fuzzers;
 pub mod undo_redo_fuzzer;
+pub mod v1_1_polyamour_nextgen_fuzzers;
 pub mod v1_godot_parity_fuzzers;
 pub mod v2_worldclass_fuzzers;
 pub mod wave2b_fuzzers;
@@ -15,6 +16,18 @@ pub use adversarial::run_all_adversarial_suites;
 pub use subsystem_fuzzers::{
     verify_animation_state_machine_fuzzer_suite, verify_navigation_and_autotile_fuzzer_suite,
     verify_physics_and_audio_dsp_fuzzer_suite, verify_ui_layout_container_solver_suite,
+};
+pub use v1_1_polyamour_nextgen_fuzzers::{
+    verify_gpu_bvh_pathtracer_and_radiance_cascades_suite,
+    verify_player_live_polyamour_and_threejs_parametric_suite,
+    verify_plnk_livelink_wire_protocol_fuzz_suite,
+    verify_polyops_v2_parser_and_replay_fuzz_suite,
+    verify_rust_hot_reload_schema_migration_suite,
+    verify_sculpt_symmetry_and_heat_bone_weights_suite,
+    verify_semantic_grind_splines_and_uv2_atlas_suite,
+    verify_sexlife_moan_and_splicy_edl_fuzz_suite,
+    verify_subobject_raycast_and_proportional_edit_suite,
+    verify_wasm_custom_section_adversarial_suite,
 };
 pub use v1_godot_parity_fuzzers::{
     verify_audio_ringbuffer_and_input_deadzone_suite,

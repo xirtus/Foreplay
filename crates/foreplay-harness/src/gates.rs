@@ -1,4 +1,4 @@
-//! Foreplay 8-Gate Headless Verification Suite.
+//! Foreplay 10-Gate Headless Verification Suite.
 //!
 //! Enforces 100% green verification across all engine subsystems:
 //! 1. Godot 4 200 .tscn Conformance Gate
@@ -9,6 +9,8 @@
 //! 6. Rapier3D Kinematics, Rigged Character GLB Import, Skeleton3D/AnimTree, TextServer & Autotiler Gate
 //! 7. GDScript 2.0 VM, Built-ins Catalog, LSP Analyzer & GDExtension Host Gate
 //! 8. Standalone PlayerRuntime, Loopback TCP Debug IPC Protocol & Pack Bundle Gate
+//! 9. Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate
+//! 10. Hardware WGSL Compute Path-Tracer, SVGF Denoiser, Native Rust Hot-Reload, WASM FPCK & SexLife Suite Gate
 
 use crate::HarnessSession;
 use bevy_math::Vec3;
@@ -16,19 +18,35 @@ use foreplay_core::{
     BbCodeRichText, ClassDb, Skeleton3D, TerrainMode, TerrainSet, TerrainTileDef, TextServer,
     TileMapTerrainAutotiler, TileSetTerrainCatalog,
 };
-use foreplay_export::{ExportConfig, ExportTarget, FpckArchive, ProjectExporter};
+use foreplay_export::{
+    extract_and_verify_wasm_fpck_section, ExportConfig, ExportTarget, FpckArchive,
+    ProjectExporter, WasmWebGpuPackager,
+};
 use foreplay_gdext::{sample_rust_gdextension_entry, supported_proc_names, GdExtensionHost};
 use foreplay_gdscript::{builtin_catalog, GdLspAnalyzer, GdVm};
 use foreplay_ir::{EditorCommand, IrNode, IrScene, IrValue, NodeId, SignalConnection};
 use foreplay_physics::{
     CharacterBody3DController, HotswapPhysicsBridge3D, RapierSpace3D,
 };
-use foreplay_player::{DebugCommand, DebugEvent, DebugIpcClient, PlayerRuntime};
+use foreplay_player::{pack_node_id, DebugCommand, DebugEvent, DebugIpcClient, PlayerRuntime};
+use foreplay_polyamour::{
+    apply_sculpt_stroke, compile_polyamour_game_bundle,
+    compute_heat_bone_weights, parse_polyops_v2, pick_edge_ray, pick_face_ray,
+    pick_vertex_ray, primitive_cube, primitive_quarterpipe, replay_polyops_v2,
+    select_edge_loop, PolyLinkMessage, PolyamourLiveLinkClient, PolyamourSemanticAttributes,
+    Ray3D, RigBoneSegment, SculptBrush, SculptStroke, ShapeKeySet, SymmetryAxes,
+};
 use foreplay_render::{
-    CanvasItemBatcher2D, HardwareDrawItem3D, HardwareLight3D, HardwareLightType,
+    CanvasItemBatcher2D, GpuComputePathTracer, GpuEmitter, GpuPathCamera, GpuPathScene,
+    GpuRadianceCascadesSolver, HardwareDrawItem3D, HardwareLight3D, HardwareLightType,
     PerspectiveCamera3D, PointLight2D, Rect2D, SdfLightField2D, TextureAssetLoader,
     WgpuRenderDevice,
 };
+use foreplay_script::{
+    compile_rust_plugin_source_to_cdylib, AudioTrackClip, CameraKeyframe, CameraShotClip,
+    MoanProjectStemLink, RustHotReloadHost, SplicyCutsceneEdl,
+};
+use foreplay_threejs::ThreeJsParametricPolyamourAsset;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -1038,7 +1056,704 @@ pub fn run_standalone_player_and_pie_ipc_gate() -> GateResult {
     }
 }
 
-/// Runs all 8 Foreplay verification gates and compiles comprehensive report.
+/// Gate 9: Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate
+#[must_use]
+pub fn run_polyamour_livelink_subobject_sculpt_and_tags_gate() -> GateResult {
+    let start = Instant::now();
+
+    // 1. Raycast picking (Face, Edge, Vertex) & Edge Loop traversal
+    let cube = primitive_cube(2.0);
+    let face_ray = Ray3D::new(Vec3::new(0.0, 0.0, 5.0), -Vec3::Z);
+    let face_hit = pick_face_ray(&cube, face_ray);
+    if face_hit.is_none() {
+        return GateResult {
+            gate_number: 9,
+            name: "Gate 9: Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate".into(),
+            description: "Raycast picking, edge loops, polyops2, sculpt, bone weights, UV2, grind splines & live TCP delta sync".into(),
+            passed: false,
+            details: "pick_face_ray failed to hit cube face".into(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+
+    let edge_ray = Ray3D::new(Vec3::new(1.0, 1.0, 5.0), -Vec3::Z);
+    let edge_hit = pick_edge_ray(&cube, edge_ray, 0.5);
+    if edge_hit.is_none() {
+        return GateResult {
+            gate_number: 9,
+            name: "Gate 9: Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate".into(),
+            description: "Raycast picking, edge loops, polyops2, sculpt, bone weights, UV2, grind splines & live TCP delta sync".into(),
+            passed: false,
+            details: "pick_edge_ray failed to hit cube edge".into(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+
+    let vert_ray = Ray3D::new(Vec3::new(1.0, 1.0, 5.0), -Vec3::Z);
+    let vert_hit = pick_vertex_ray(&cube, vert_ray, 0.5);
+    if vert_hit.is_none() {
+        return GateResult {
+            gate_number: 9,
+            name: "Gate 9: Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate".into(),
+            description: "Raycast picking, edge loops, polyops2, sculpt, bone weights, UV2, grind splines & live TCP delta sync".into(),
+            passed: false,
+            details: "pick_vertex_ray failed to hit cube vertex".into(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+
+    let edge_loop = select_edge_loop(&cube, [0, 1]);
+    if edge_loop.is_empty() {
+        return GateResult {
+            gate_number: 9,
+            name: "Gate 9: Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate".into(),
+            description: "Raycast picking, edge loops, polyops2, sculpt, bone weights, UV2, grind splines & live TCP delta sync".into(),
+            passed: false,
+            details: "select_edge_loop returned empty loop".into(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+
+    // 2. Parameterized polyops 2 modeling & semantic attributes
+    let mut qpipe = primitive_quarterpipe(2.0, 4.0, 4);
+    let mut attrs = PolyamourSemanticAttributes::new();
+    let polyops_script = "polyops 2\nbevel_edges 0-1 offset=0.05 segments=1\ntag_edge 0-1 tag=grind_edge\ntag_face 0 tag=collision_trimesh\n";
+    let steps = match parse_polyops_v2(polyops_script) {
+        Ok(s) => s,
+        Err(e) => {
+            return GateResult {
+                gate_number: 9,
+                name: "Gate 9: Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate".into(),
+                description: "Raycast picking, edge loops, polyops2, sculpt, bone weights, UV2, grind splines & live TCP delta sync".into(),
+                passed: false,
+                details: format!("parse_polyops_v2 error: {e}"),
+                duration_ms: start.elapsed().as_millis() as u64,
+            };
+        }
+    };
+    if let Err(e) = replay_polyops_v2(&mut qpipe, &mut attrs, &steps) {
+        return GateResult {
+            gate_number: 9,
+            name: "Gate 9: Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate".into(),
+            description: "Raycast picking, edge loops, polyops2, sculpt, bone weights, UV2, grind splines & live TCP delta sync".into(),
+            passed: false,
+            details: format!("replay_polyops_v2 error: {e}"),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+
+    // 3. BVH Sculpt stroke, Heat Bone Weights (sum == 1.0) & ShapeKeySet
+    let sculpt_stroke = SculptStroke {
+        brush: SculptBrush::Grab,
+        hit_point: Vec3::new(0.0, 1.0, 0.0),
+        hit_normal: Vec3::Y,
+        radius: 1.5,
+        strength: 0.5,
+        symmetry: SymmetryAxes::none(),
+        stroke_delta: Some(Vec3::new(0.0, 0.25, 0.0)),
+    };
+    apply_sculpt_stroke(&mut qpipe, &sculpt_stroke);
+
+    let bones = vec![
+        RigBoneSegment::new("CopingJoint", Vec3::new(-2.0, 2.0, 0.0), Vec3::new(2.0, 2.0, 0.0), 1.0),
+        RigBoneSegment::new("BaseJoint", Vec3::new(-2.0, 0.0, 2.0), Vec3::new(2.0, 0.0, 2.0), 1.0),
+    ];
+    let skin_weights = compute_heat_bone_weights(&qpipe, &bones);
+    if skin_weights.len() != qpipe.positions.len() {
+        return GateResult {
+            gate_number: 9,
+            name: "Gate 9: Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate".into(),
+            description: "Raycast picking, edge loops, polyops2, sculpt, bone weights, UV2, grind splines & live TCP delta sync".into(),
+            passed: false,
+            details: "compute_heat_bone_weights length mismatch".into(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+    for (idx, sw) in skin_weights.iter().enumerate() {
+        let sum: f32 = sw.weights.iter().sum();
+        if (sum - 1.0).abs() > 1e-3 {
+            return GateResult {
+                gate_number: 9,
+                name: "Gate 9: Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate".into(),
+                description: "Raycast picking, edge loops, polyops2, sculpt, bone weights, UV2, grind splines & live TCP delta sync".into(),
+                passed: false,
+                details: format!("skin weight at vertex {idx} sum is {sum} != 1.0"),
+                duration_ms: start.elapsed().as_millis() as u64,
+            };
+        }
+    }
+
+    let mut shape_keys = ShapeKeySet::from_polymesh(&qpipe);
+    let deltas = vec![Vec3::new(0.0, 0.1, 0.0); qpipe.positions.len()];
+    if !shape_keys.sculpt_shape_key_delta("CopingLift", &deltas) {
+        return GateResult {
+            gate_number: 9,
+            name: "Gate 9: Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate".into(),
+            description: "Raycast picking, edge loops, polyops2, sculpt, bone weights, UV2, grind splines & live TCP delta sync".into(),
+            passed: false,
+            details: "sculpt_shape_key_delta failed".into(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+
+    // 4. Game bundle compilation: grind_edge, collision_trimesh & Smart UV2
+    attrs.tag_edge([0, 1], "grind_edge");
+    attrs.tag_face(0, "collision_trimesh");
+    let game_bundle = compile_polyamour_game_bundle(&qpipe, &attrs);
+    if game_bundle.grind_rail_splines.is_empty() {
+        return GateResult {
+            gate_number: 9,
+            name: "Gate 9: Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate".into(),
+            description: "Raycast picking, edge loops, polyops2, sculpt, bone weights, UV2, grind splines & live TCP delta sync".into(),
+            passed: false,
+            details: "compile_polyamour_game_bundle produced 0 grind rail splines".into(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+    if game_bundle.uv2_by_face.is_empty() {
+        return GateResult {
+            gate_number: 9,
+            name: "Gate 9: Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate".into(),
+            description: "Raycast picking, edge loops, polyops2, sculpt, bone weights, UV2, grind splines & live TCP delta sync".into(),
+            passed: false,
+            details: "compile_polyamour_game_bundle produced 0 UV2 coordinates".into(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+
+    // ThreeJsParametricPolyamourAsset verification
+    let mut ramp_props = BTreeMap::new();
+    ramp_props.insert("polyamour_primitive".into(), IrValue::String("Quarterpipe".into()));
+    ramp_props.insert("radius".into(), IrValue::F64(2.0));
+    ramp_props.insert("width".into(), IrValue::F64(4.0));
+    ramp_props.insert("segments".into(), IrValue::I64(4));
+    ramp_props.insert("grind_edges".into(), IrValue::String("[[0, 1], [1, 2]]".into()));
+    let ramp_node = IrNode {
+        id: NodeId::new(10, 1).unwrap(),
+        name: "TestQuarterpipe".into(),
+        class_name: "MeshInstance3D".into(),
+        parent: None,
+        instance_scene: None,
+        properties: ramp_props,
+        groups: vec!["ramp".into()],
+    };
+    let threejs_asset = match ThreeJsParametricPolyamourAsset::from_node(&ramp_node) {
+        Some(a) => a,
+        None => {
+            return GateResult {
+                gate_number: 9,
+                name: "Gate 9: Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate".into(),
+                description: "Raycast picking, edge loops, polyops2, sculpt, bone weights, UV2, grind splines & live TCP delta sync".into(),
+                passed: false,
+                details: "ThreeJsParametricPolyamourAsset::from_node returned None".into(),
+                duration_ms: start.elapsed().as_millis() as u64,
+            };
+        }
+    };
+    if threejs_asset.baked.uv2.is_empty() || threejs_asset.baked.grind_rail_splines.is_empty() {
+        return GateResult {
+            gate_number: 9,
+            name: "Gate 9: Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate".into(),
+            description: "Raycast picking, edge loops, polyops2, sculpt, bone weights, UV2, grind splines & live TCP delta sync".into(),
+            passed: false,
+            details: "ThreeJsParametricPolyamourAsset missing UV2 or grind splines".into(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+
+    // 5. PolyamourLiveLinkClient -> PlayerRuntime live TCP streaming delta
+    let mut scene = IrScene::new("Gate9LiveScene");
+    let ground_id = NodeId::new(20, 1).unwrap();
+    let ground_node = IrNode {
+        id: ground_id,
+        name: "GroundFeature".into(),
+        class_name: "StaticBody3D".into(),
+        parent: None,
+        instance_scene: None,
+        properties: BTreeMap::new(),
+        groups: vec![],
+    };
+    scene.nodes.insert(ground_id, ground_node);
+
+    let mut runtime = PlayerRuntime::new(scene);
+    let addr = match runtime.bind_polyamour_live_link("127.0.0.1:0") {
+        Ok(a) => a,
+        Err(e) => {
+            return GateResult {
+                gate_number: 9,
+                name: "Gate 9: Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate".into(),
+                description: "Raycast picking, edge loops, polyops2, sculpt, bone weights, UV2, grind splines & live TCP delta sync".into(),
+                passed: false,
+                details: format!("bind_polyamour_live_link error: {e}"),
+                duration_ms: start.elapsed().as_millis() as u64,
+            };
+        }
+    };
+
+    let mut client = match PolyamourLiveLinkClient::connect_timeout(addr, std::time::Duration::from_secs(2)) {
+        Ok(c) => c,
+        Err(e) => {
+            return GateResult {
+                gate_number: 9,
+                name: "Gate 9: Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate".into(),
+                description: "Raycast picking, edge loops, polyops2, sculpt, bone weights, UV2, grind splines & live TCP delta sync".into(),
+                passed: false,
+                details: format!("PolyamourLiveLinkClient connect error: {e}"),
+                duration_ms: start.elapsed().as_millis() as u64,
+            };
+        }
+    };
+
+    let delta = PolyLinkMessage::MeshDeltaSync {
+        node_id: pack_node_id(ground_id),
+        revision: 1,
+        updated_vertices: vec![
+            (0, [0.0, 0.0, 0.0]),
+            (1, [4.0, 0.0, 0.0]),
+            (2, [4.0, 0.0, 4.0]),
+            (3, [0.0, 0.0, 4.0]),
+        ],
+        replaced_faces: Some(vec![vec![0, 1, 2, 3]]),
+        edge_tags: vec![([0, 1], "grind_edge".into())],
+        face_tags: vec![(0, "collision_trimesh".into())],
+    };
+
+    if let Err(e) = client.send_message(&delta) {
+        return GateResult {
+            gate_number: 9,
+            name: "Gate 9: Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate".into(),
+            description: "Raycast picking, edge loops, polyops2, sculpt, bone weights, UV2, grind splines & live TCP delta sync".into(),
+            passed: false,
+            details: format!("client.send_message error: {e}"),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+
+    let polled = runtime.poll_polyamour_live_link_timeout(std::time::Duration::from_millis(500));
+    if polled == 0 {
+        return GateResult {
+            gate_number: 9,
+            name: "Gate 9: Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate".into(),
+            description: "Raycast picking, edge loops, polyops2, sculpt, bone weights, UV2, grind splines & live TCP delta sync".into(),
+            passed: false,
+            details: "runtime.poll_polyamour_live_link_timeout received 0 messages".into(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+
+    // Mid-gameplay tick stepping with hot-updated collider and zero momentum loss
+    runtime.step_frame(1.0 / 60.0);
+
+    let has_collider = runtime.physics_space.node_to_collider.contains_key(&ground_id);
+    let has_live_mesh = runtime.live_polyamour_meshes().contains_key(&ground_id);
+    if !has_collider || !has_live_mesh {
+        return GateResult {
+            gate_number: 9,
+            name: "Gate 9: Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate".into(),
+            description: "Raycast picking, edge loops, polyops2, sculpt, bone weights, UV2, grind splines & live TCP delta sync".into(),
+            passed: false,
+            details: "runtime did not register hot-streamed collider or live mesh".into(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+
+    GateResult {
+        gate_number: 9,
+        name: "Gate 9: Polyamour Live-Link, Sub-Object Raycast, BVH Sculpt, Heat Bone Weights & Semantic Game Tags Gate".into(),
+        description: "Raycast picking, edge loops, polyops2, sculpt, bone weights, UV2, grind splines & live TCP delta sync".into(),
+        passed: true,
+        details: format!(
+            "Sub-object raycast OK | Sculpt & BoneWeights (sum=1.0) OK | UV2 & Grind Splines OK | TCP LiveLink delta sync ({addr}) OK"
+        ),
+        duration_ms: start.elapsed().as_millis() as u64,
+    }
+}
+
+/// Gate 10: Hardware WGSL Compute Path-Tracer, SVGF Denoiser, Native Rust Hot-Reload, WASM FPCK & SexLife Suite Gate
+#[must_use]
+pub fn run_gpu_pathtracer_rust_hotreload_wasm_and_sexlife_gate() -> GateResult {
+    let start = Instant::now();
+
+    // 1. Hardware WGSL Compute Path-Tracer + SVGF Denoiser + AgX tonemapping
+    let device = WgpuRenderDevice::new_or_fallback();
+    let mut pt = GpuComputePathTracer::new();
+    let mut pt_scene = GpuPathScene::new();
+    pt_scene.add_box(
+        Vec3::ZERO,
+        Vec3::new(2.0, 2.0, 2.0),
+        [0.8, 0.2, 0.2, 1.0],
+        0.3,
+        0.0,
+        [0.0, 0.0, 0.0],
+    );
+    let pt_cam = GpuPathCamera::default();
+    let pt_out = match pt.trace_and_denoise_rgba(&device, &pt_scene, &pt_cam, 64, 64, 2, true) {
+        Ok(o) => o,
+        Err(e) => {
+            return GateResult {
+                gate_number: 10,
+                name: "Gate 10: Hardware WGSL Compute Path-Tracer, SVGF Denoiser, Native Rust Hot-Reload, WASM FPCK & SexLife Suite Gate".into(),
+                description: "Hardware WGSL path tracer + SVGF + Radiance Cascades, native Rust cdylib hot reload, WASM custom section & SexLife suite".into(),
+                passed: false,
+                details: format!("trace_and_denoise_rgba error: {e}"),
+                duration_ms: start.elapsed().as_millis() as u64,
+            };
+        }
+    };
+    if pt_out.rgba8.len() != 64 * 64 * 4 {
+        return GateResult {
+            gate_number: 10,
+            name: "Gate 10: Hardware WGSL Compute Path-Tracer, SVGF Denoiser, Native Rust Hot-Reload, WASM FPCK & SexLife Suite Gate".into(),
+            description: "Hardware WGSL path tracer + SVGF + Radiance Cascades, native Rust cdylib hot reload, WASM custom section & SexLife suite".into(),
+            passed: false,
+            details: format!("trace_and_denoise_rgba output buffer len was {}, expected {}", pt_out.rgba8.len(), 64 * 64 * 4),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+
+    // GpuRadianceCascadesSolver dispatch
+    let mut rc = GpuRadianceCascadesSolver::new();
+    let emitters = vec![GpuEmitter::new(Vec3::new(0.0, 2.0, 0.0), 1.0, [1.0, 0.9, 0.8], 8.0)];
+    let rc_out = match rc.solve_radiance_cascades(
+        &device,
+        &emitters,
+        Vec3::splat(-4.0),
+        Vec3::splat(4.0),
+        [16, 16],
+        4,
+        [0.05, 0.05, 0.1],
+    ) {
+        Ok(o) => o,
+        Err(e) => {
+            return GateResult {
+                gate_number: 10,
+                name: "Gate 10: Hardware WGSL Compute Path-Tracer, SVGF Denoiser, Native Rust Hot-Reload, WASM FPCK & SexLife Suite Gate".into(),
+                description: "Hardware WGSL path tracer + SVGF + Radiance Cascades, native Rust cdylib hot reload, WASM custom section & SexLife suite".into(),
+                passed: false,
+                details: format!("solve_radiance_cascades error: {e}"),
+                duration_ms: start.elapsed().as_millis() as u64,
+            };
+        }
+    };
+    if rc_out.probe_grid.len() != 16 * 16 {
+        return GateResult {
+            gate_number: 10,
+            name: "Gate 10: Hardware WGSL Compute Path-Tracer, SVGF Denoiser, Native Rust Hot-Reload, WASM FPCK & SexLife Suite Gate".into(),
+            description: "Hardware WGSL path tracer + SVGF + Radiance Cascades, native Rust cdylib hot reload, WASM custom section & SexLife suite".into(),
+            passed: false,
+            details: format!("solve_radiance_cascades probe grid len was {}, expected 256", rc_out.probe_grid.len()),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+
+    // 2. Native Rust .dylib/.so hot-reload (v1 -> v2) with state migration
+    static GATE10_RUN_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let run_id = GATE10_RUN_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "foreplay_hotreload_gate10_{}_{}_{}",
+        std::process::id(),
+        run_id,
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()
+    ));
+    let _ = std::fs::create_dir_all(&temp_dir);
+
+    let src_v1 = r#"
+static DESCRIPTOR_NAME: &[u8] = b"Gate10SkaterPlugin\0";
+static PROP_SPEED: &[u8] = b"speed\0";
+static DEF_SPEED: &[u8] = b"12.0\0";
+
+static SCHEMAS: [RustPropertySchema; 1] = [RustPropertySchema {
+    name: PROP_SPEED.as_ptr() as *const ::std::ffi::c_char,
+    prop_type: 3, // F64
+    default_json: DEF_SPEED.as_ptr() as *const ::std::ffi::c_char,
+}];
+
+pub unsafe extern "C" fn desc() -> RustPluginDescriptor {
+    RustPluginDescriptor {
+        abi_version: 1,
+        name: DESCRIPTOR_NAME.as_ptr() as *const ::std::ffi::c_char,
+        schema_count: 1,
+        schemas: SCHEMAS.as_ptr(),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn foreplay_rust_plugin_entry() -> ForeplayRustPluginVTable {
+    ForeplayRustPluginVTable {
+        abi_version: 1,
+        descriptor: desc,
+        on_init: None,
+        on_ready: None,
+        on_update: None,
+        on_physics_update: None,
+        on_unload: None,
+        get_property_json: None,
+        set_property_json: None,
+    }
+}
+"#;
+
+    let dylib_v1 = match compile_rust_plugin_source_to_cdylib(src_v1, &temp_dir, "gate10_skater_v1") {
+        Ok(p) => p,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+            return GateResult {
+                gate_number: 10,
+                name: "Gate 10: Hardware WGSL Compute Path-Tracer, SVGF Denoiser, Native Rust Hot-Reload, WASM FPCK & SexLife Suite Gate".into(),
+                description: "Hardware WGSL path tracer + SVGF + Radiance Cascades, native Rust cdylib hot reload, WASM custom section & SexLife suite".into(),
+                passed: false,
+                details: format!("compile v1 error: {e}"),
+                duration_ms: start.elapsed().as_millis() as u64,
+            };
+        }
+    };
+
+    let mut host = RustHotReloadHost::new("Gate10SkaterPlugin", Some(temp_dir.clone()));
+    let test_node = NodeId::new(42, 1).unwrap();
+    let mut initial_props = BTreeMap::new();
+    initial_props.insert("speed".into(), IrValue::F64(18.5));
+    host.bind_node(test_node, Some(initial_props));
+
+    let report_v1 = match host.load_from_path(&dylib_v1) {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+            return GateResult {
+                gate_number: 10,
+                name: "Gate 10: Hardware WGSL Compute Path-Tracer, SVGF Denoiser, Native Rust Hot-Reload, WASM FPCK & SexLife Suite Gate".into(),
+                description: "Hardware WGSL path tracer + SVGF + Radiance Cascades, native Rust cdylib hot reload, WASM custom section & SexLife suite".into(),
+                passed: false,
+                details: format!("load v1 error: {e}"),
+                duration_ms: start.elapsed().as_millis() as u64,
+            };
+        }
+    };
+    if report_v1.preserved_keys.len() != 1 {
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        return GateResult {
+            gate_number: 10,
+            name: "Gate 10: Hardware WGSL Compute Path-Tracer, SVGF Denoiser, Native Rust Hot-Reload, WASM FPCK & SexLife Suite Gate".into(),
+            description: "Hardware WGSL path tracer + SVGF + Radiance Cascades, native Rust cdylib hot reload, WASM custom section & SexLife suite".into(),
+            passed: false,
+            details: format!("expected 1 preserved property in v1, got {:?}", report_v1.preserved_keys),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+
+    let src_v2 = r#"
+static DESCRIPTOR_NAME: &[u8] = b"Gate10SkaterPlugin\0";
+static PROP_SPEED: &[u8] = b"speed\0";
+static DEF_SPEED: &[u8] = b"12.0\0";
+static PROP_AIRTIME: &[u8] = b"airtime\0";
+static DEF_AIRTIME: &[u8] = b"0.0\0";
+
+static SCHEMAS: [RustPropertySchema; 2] = [
+    RustPropertySchema {
+        name: PROP_SPEED.as_ptr() as *const ::std::ffi::c_char,
+        prop_type: 3, // F64
+        default_json: DEF_SPEED.as_ptr() as *const ::std::ffi::c_char,
+    },
+    RustPropertySchema {
+        name: PROP_AIRTIME.as_ptr() as *const ::std::ffi::c_char,
+        prop_type: 3, // F64
+        default_json: DEF_AIRTIME.as_ptr() as *const ::std::ffi::c_char,
+    },
+];
+
+pub unsafe extern "C" fn desc() -> RustPluginDescriptor {
+    RustPluginDescriptor {
+        abi_version: 1,
+        name: DESCRIPTOR_NAME.as_ptr() as *const ::std::ffi::c_char,
+        schema_count: 2,
+        schemas: SCHEMAS.as_ptr(),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn foreplay_rust_plugin_entry() -> ForeplayRustPluginVTable {
+    ForeplayRustPluginVTable {
+        abi_version: 1,
+        descriptor: desc,
+        on_init: None,
+        on_ready: None,
+        on_update: None,
+        on_physics_update: None,
+        on_unload: None,
+        get_property_json: None,
+        set_property_json: None,
+    }
+}
+"#;
+
+    let dylib_v2 = match compile_rust_plugin_source_to_cdylib(src_v2, &temp_dir, "gate10_skater_v2") {
+        Ok(p) => p,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+            return GateResult {
+                gate_number: 10,
+                name: "Gate 10: Hardware WGSL Compute Path-Tracer, SVGF Denoiser, Native Rust Hot-Reload, WASM FPCK & SexLife Suite Gate".into(),
+                description: "Hardware WGSL path tracer + SVGF + Radiance Cascades, native Rust cdylib hot reload, WASM custom section & SexLife suite".into(),
+                passed: false,
+                details: format!("compile v2 error: {e}"),
+                duration_ms: start.elapsed().as_millis() as u64,
+            };
+        }
+    };
+
+    let report_v2 = match host.load_from_path(&dylib_v2) {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+            return GateResult {
+                gate_number: 10,
+                name: "Gate 10: Hardware WGSL Compute Path-Tracer, SVGF Denoiser, Native Rust Hot-Reload, WASM FPCK & SexLife Suite Gate".into(),
+                description: "Hardware WGSL path tracer + SVGF + Radiance Cascades, native Rust cdylib hot reload, WASM custom section & SexLife suite".into(),
+                passed: false,
+                details: format!("hot reload v2 error: {e}"),
+                duration_ms: start.elapsed().as_millis() as u64,
+            };
+        }
+    };
+    if report_v2.preserved_keys.len() != 1 || report_v2.defaulted_new_keys.len() != 1 {
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        return GateResult {
+            gate_number: 10,
+            name: "Gate 10: Hardware WGSL Compute Path-Tracer, SVGF Denoiser, Native Rust Hot-Reload, WASM FPCK & SexLife Suite Gate".into(),
+            description: "Hardware WGSL path tracer + SVGF + Radiance Cascades, native Rust cdylib hot reload, WASM custom section & SexLife suite".into(),
+            passed: false,
+            details: format!(
+                "expected 1 preserved and 1 defaulted property in v2, got {:?} preserved, {:?} defaulted",
+                report_v2.preserved_keys, report_v2.defaulted_new_keys
+            ),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+    let _ = std::fs::remove_dir_all(&temp_dir);
+
+    // 3. WasmWebGpuPackager & extract_and_verify_wasm_fpck_section custom section verification
+    let mut archive_files = BTreeMap::new();
+    archive_files.insert("project.foreplay".into(), b"title=Gate10WasmGame\n".to_vec());
+    archive_files.insert("main.fscn".into(), b"[scene name=\"Main\"]\n[node name=\"Player\" type=\"CharacterBody3D\"]\n".to_vec());
+    let fpck_archive_bytes = match FpckArchive::pack_bytes(&archive_files) {
+        Ok(b) => b,
+        Err(e) => {
+            return GateResult {
+                gate_number: 10,
+                name: "Gate 10: Hardware WGSL Compute Path-Tracer, SVGF Denoiser, Native Rust Hot-Reload, WASM FPCK & SexLife Suite Gate".into(),
+                description: "Hardware WGSL path tracer + SVGF + Radiance Cascades, native Rust cdylib hot reload, WASM custom section & SexLife suite".into(),
+                passed: false,
+                details: format!("FpckArchive pack error: {e}"),
+                duration_ms: start.elapsed().as_millis() as u64,
+            };
+        }
+    };
+
+    let wasm_binary = WasmWebGpuPackager::build_wasm_module(&fpck_archive_bytes);
+    let extracted_files = match extract_and_verify_wasm_fpck_section(&wasm_binary) {
+        Ok(f) => f,
+        Err(e) => {
+            return GateResult {
+                gate_number: 10,
+                name: "Gate 10: Hardware WGSL Compute Path-Tracer, SVGF Denoiser, Native Rust Hot-Reload, WASM FPCK & SexLife Suite Gate".into(),
+                description: "Hardware WGSL path tracer + SVGF + Radiance Cascades, native Rust cdylib hot reload, WASM custom section & SexLife suite".into(),
+                passed: false,
+                details: format!("extract_and_verify_wasm_fpck_section error: {e}"),
+                duration_ms: start.elapsed().as_millis() as u64,
+            };
+        }
+    };
+    if !extracted_files.contains_key("project.foreplay") || !extracted_files.contains_key("main.fscn") {
+        return GateResult {
+            gate_number: 10,
+            name: "Gate 10: Hardware WGSL Compute Path-Tracer, SVGF Denoiser, Native Rust Hot-Reload, WASM FPCK & SexLife Suite Gate".into(),
+            description: "Hardware WGSL path tracer + SVGF + Radiance Cascades, native Rust cdylib hot reload, WASM custom section & SexLife suite".into(),
+            passed: false,
+            details: "WASM custom section missing expected files".into(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+
+    // 4. MoanProjectStemLink adaptive mix & SplicyCutsceneEdl timeline
+    let soundtrack = MoanProjectStemLink::default_skate_soundtrack();
+    if soundtrack.stems.len() != 4 {
+        return GateResult {
+            gate_number: 10,
+            name: "Gate 10: Hardware WGSL Compute Path-Tracer, SVGF Denoiser, Native Rust Hot-Reload, WASM FPCK & SexLife Suite Gate".into(),
+            description: "Hardware WGSL path tracer + SVGF + Radiance Cascades, native Rust cdylib hot reload, WASM custom section & SexLife suite".into(),
+            passed: false,
+            details: format!("expected 4 stems in default skate soundtrack, got {}", soundtrack.stems.len()),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+    let mix_snapshot = soundtrack.evaluate_adaptive_mix(0.85, true, 8.0);
+    if mix_snapshot.stem_gains.len() != 4 || !mix_snapshot.combo_active {
+        return GateResult {
+            gate_number: 10,
+            name: "Gate 10: Hardware WGSL Compute Path-Tracer, SVGF Denoiser, Native Rust Hot-Reload, WASM FPCK & SexLife Suite Gate".into(),
+            description: "Hardware WGSL path tracer + SVGF + Radiance Cascades, native Rust cdylib hot reload, WASM custom section & SexLife suite".into(),
+            passed: false,
+            details: "evaluate_adaptive_mix returned unexpected mix state".into(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+
+    let mut cutscene_edl = SplicyCutsceneEdl::new("IntroCutscene", 10.0, 60.0);
+    let cam_node = NodeId::new(100, 1).unwrap();
+    cutscene_edl.camera_shots.push(CameraShotClip {
+        id: "Shot1".into(),
+        camera_node: cam_node,
+        start_time_sec: 0.0,
+        end_time_sec: 5.0,
+        focal_length_mm: 35.0,
+        aperture_f_stop: 2.8,
+        dolly_orbit_keyframes: vec![
+            CameraKeyframe {
+                time_offset_sec: 0.0,
+                position: [0.0, 2.0, 5.0],
+                rotation_quat: [0.0, 0.0, 0.0, 1.0],
+                fov_degrees: 60.0,
+            },
+            CameraKeyframe {
+                time_offset_sec: 5.0,
+                position: [2.0, 2.0, 4.0],
+                rotation_quat: [0.0, 0.0, 0.0, 1.0],
+                fov_degrees: 60.0,
+            },
+        ],
+    });
+    cutscene_edl.audio_clips.push(AudioTrackClip {
+        id: "MusicLeadIn".into(),
+        asset_path: "res://audio/sting.ogg".into(),
+        clip_start_sec: 2.0,
+        clip_end_sec: 6.0,
+        audio_lead_in_sec: 1.0,
+        audio_tail_out_sec: 1.5,
+        base_volume: 0.9,
+    });
+
+    let scrub_snap = cutscene_edl.evaluate_at(1.5);
+    if scrub_snap.active_audio.is_empty() || !scrub_snap.active_audio[0].in_j_cut_lead {
+        return GateResult {
+            gate_number: 10,
+            name: "Gate 10: Hardware WGSL Compute Path-Tracer, SVGF Denoiser, Native Rust Hot-Reload, WASM FPCK & SexLife Suite Gate".into(),
+            description: "Hardware WGSL path tracer + SVGF + Radiance Cascades, native Rust cdylib hot reload, WASM custom section & SexLife suite".into(),
+            passed: false,
+            details: "Splicy J-cut audio evaluation failed at lead-in".into(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
+
+    GateResult {
+        gate_number: 10,
+        name: "Gate 10: Hardware WGSL Compute Path-Tracer, SVGF Denoiser, Native Rust Hot-Reload, WASM FPCK & SexLife Suite Gate".into(),
+        description: "Hardware WGSL path tracer + SVGF + Radiance Cascades, native Rust cdylib hot reload, WASM custom section & SexLife suite".into(),
+        passed: true,
+        details: "WGSL PathTracer & RadianceCascades OK | Native Rust HotReload v1->v2 OK | WASM FPCK section OK | Moan & Splicy EDL OK".into(),
+        duration_ms: start.elapsed().as_millis() as u64,
+    }
+}
+
+/// Runs all 10 Foreplay verification gates and compiles comprehensive report.
 #[must_use]
 pub fn run_all_verification_gates() -> AllGatesReport {
     let start = Instant::now();
@@ -1051,6 +1766,8 @@ pub fn run_all_verification_gates() -> AllGatesReport {
         run_rapier_glb_animtree_text_gate(),
         run_gdscript2_lsp_and_gdext_gate(),
         run_standalone_player_and_pie_ipc_gate(),
+        run_polyamour_livelink_subobject_sculpt_and_tags_gate(),
+        run_gpu_pathtracer_rust_hotreload_wasm_and_sexlife_gate(),
     ];
 
     let total_gates = gates.len();
@@ -1119,9 +1836,21 @@ mod tests {
     }
 
     #[test]
-    fn test_all_8_gates_combined() {
+    fn test_gate_9_polyamour_livelink_subobject_sculpt_and_tags() {
+        let res = run_polyamour_livelink_subobject_sculpt_and_tags_gate();
+        assert!(res.passed, "Gate 9 failed: {}", res.details);
+    }
+
+    #[test]
+    fn test_gate_10_gpu_pathtracer_rust_hotreload_wasm_and_sexlife() {
+        let res = run_gpu_pathtracer_rust_hotreload_wasm_and_sexlife_gate();
+        assert!(res.passed, "Gate 10 failed: {}", res.details);
+    }
+
+    #[test]
+    fn test_all_10_gates_combined() {
         let report = run_all_verification_gates();
-        assert_eq!(report.passed_gates, 8);
+        assert_eq!(report.passed_gates, 10);
         assert_eq!(report.failed_gates, 0);
         assert!(report.all_passed());
     }

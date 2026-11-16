@@ -4,14 +4,14 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "MPL-2.0"
-description = "Native Rust hot-reload scripting host and rustports-quickjs TypeScript/JS bridge"
+description = "Native Rust .dylib/.so hot-reload scripting host, sexlife (Moan/Splicy) bridges, and rustports-quickjs TypeScript/JS evaluator"
 
 [dependencies]
 foreplay-ir = { path = "../foreplay-ir" }
+libloading = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [lints]
 workspace = true
-

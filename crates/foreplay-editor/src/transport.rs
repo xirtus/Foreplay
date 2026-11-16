@@ -24,7 +24,7 @@ pub fn render_top_bar(app: &mut ForeplayEditorApp, ui: &mut Ui) {
     // Row 1: Top Menu Bar, Center Studio LCD HUD, and Transport Controls
     ui.horizontal(|ui| {
         // Engine Logo
-        ui.label(RichText::new("FOREPLAY").strong().color(STUDIO_OBSIDIAN_ACCENT));
+        ui.label(RichText::new("FOREPLAY v1.1.0").strong().color(STUDIO_OBSIDIAN_ACCENT));
         ui.separator();
 
         // 1. Scene Menu

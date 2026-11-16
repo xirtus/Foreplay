@@ -4,13 +4,15 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "MPL-2.0"
-description = "Godot-style RenderingServer RIDs over hardware wgpu 30 (Clustered Forward+ PBR, Cascaded Shadows, GPU Skinning, 2D SDF Lights) + SexOS scanout fallback"
+description = "Godot-style RenderingServer RIDs over hardware wgpu 30 (Clustered Forward+ PBR, Compute Path-Tracer + SVGF, Zero-Copy egui-wgpu, 2D SDF Lights)"
 
 [dependencies]
 foreplay-ir = { path = "../foreplay-ir" }
 foreplay-platform = { path = "../foreplay-platform" }
 bevy_math = { workspace = true }
 wgpu = { workspace = true }
+egui = { workspace = true }
+egui-wgpu = { workspace = true }
 bytemuck = { workspace = true }
 pollster = { workspace = true }
 image = { workspace = true }

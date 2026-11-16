@@ -1,5 +1,7 @@
 pub mod benchmark;
 pub mod canvas2d;
+pub mod gpu_gi_compute;
+pub mod gpu_pathtracer;
 pub mod meshlet;
 pub mod pbr_gi;
 pub mod perceptual;
@@ -7,12 +9,20 @@ pub mod pipeline;
 pub mod shader;
 pub mod textures;
 pub mod wgpu_backend;
+pub mod zero_copy_viewport;
 
 pub use benchmark::{run_10k_entity_render_benchmark, DrawCommand, RenderBenchmarkReceipt};
 pub use canvas2d::{
     CanvasBatch2D, CanvasBoneWeight2D, CanvasItem, CanvasItemBatcher2D, CanvasItemKind,
     CanvasModulate, CanvasPolygon2D, CanvasVertex2D, DirectionalLight2D, LightOccluder2D,
     OccluderCullMode, PointLight2D, Rect2D, SdfLightField2D,
+};
+pub use gpu_gi_compute::{
+    GpuEmitter, GpuRadianceCascadesResult, GpuRadianceCascadesSolver, GpuRadianceProbe,
+};
+pub use gpu_pathtracer::{
+    GpuBvhNode, GpuComputePathTracer, GpuPathCamera, GpuPathScene, GpuPathTraceOutput,
+    GpuPathTriangle,
 };
 pub use meshlet::{build_meshlets, cull_meshlets, Meshlet, MAX_MESHLET_TRIANGLES, MAX_MESHLET_VERTICES};
 pub use pbr_gi::{
@@ -28,6 +38,7 @@ pub use wgpu_backend::{
     HardwareLight3D, HardwareLightType, HardwareVertex3D, RenderHardwareError, WgpuFrameTelemetry,
     WgpuRenderDevice,
 };
+pub use zero_copy_viewport::{SurfaceError, SurfaceSwapchainPresenter, ZeroCopyViewportBridge};
 
 use std::collections::BTreeMap;
 use bevy_math::{Mat4, Quat, Vec2, Vec3, Vec4};

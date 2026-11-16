@@ -1642,7 +1642,7 @@ checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
 
 [[package]]
 name = "foreplay-atlas"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "foreplay-ir",
  "serde",
@@ -1651,7 +1651,7 @@ dependencies = [
 
 [[package]]
 name = "foreplay-audio"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "bevy_math",
  "cpal",
@@ -1663,7 +1663,7 @@ dependencies = [
 
 [[package]]
 name = "foreplay-core"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "bevy_ecs",
  "bevy_math",
@@ -1676,7 +1676,7 @@ dependencies = [
 
 [[package]]
 name = "foreplay-editor"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "bevy_math",
  "eframe",
@@ -1705,7 +1705,7 @@ dependencies = [
 
 [[package]]
 name = "foreplay-export"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "foreplay-ir",
  "foreplay-player",
@@ -1717,7 +1717,7 @@ dependencies = [
 
 [[package]]
 name = "foreplay-gdext"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "foreplay-core",
  "foreplay-gdscript",
@@ -1729,7 +1729,7 @@ dependencies = [
 
 [[package]]
 name = "foreplay-gdscript"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "foreplay-ir",
  "serde",
@@ -1739,7 +1739,7 @@ dependencies = [
 
 [[package]]
 name = "foreplay-harness"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "bevy_math",
  "foreplay-atlas",
@@ -1752,6 +1752,7 @@ dependencies = [
  "foreplay-physics",
  "foreplay-platform",
  "foreplay-player",
+ "foreplay-polyamour",
  "foreplay-porthost",
  "foreplay-render",
  "foreplay-script",
@@ -1763,7 +1764,7 @@ dependencies = [
 
 [[package]]
 name = "foreplay-ir"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1772,14 +1773,14 @@ dependencies = [
 
 [[package]]
 name = "foreplay-net"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "foreplay-ir",
 ]
 
 [[package]]
 name = "foreplay-physics"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "bevy_math",
  "foreplay-ir",
@@ -1791,7 +1792,7 @@ dependencies = [
 
 [[package]]
 name = "foreplay-platform"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "foreplay-ir",
  "gilrs",
@@ -1802,7 +1803,7 @@ dependencies = [
 
 [[package]]
 name = "foreplay-player"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "bevy_math",
  "foreplay-audio",
@@ -1826,7 +1827,7 @@ dependencies = [
 
 [[package]]
 name = "foreplay-polyamour"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "bevy_math",
  "foreplay-ir",
@@ -1837,7 +1838,7 @@ dependencies = [
 
 [[package]]
 name = "foreplay-porthost"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "bevy_math",
  "foreplay-ir",
@@ -1850,10 +1851,12 @@ dependencies = [
 
 [[package]]
 name = "foreplay-render"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "bevy_math",
  "bytemuck",
+ "egui",
+ "egui-wgpu",
  "foreplay-ir",
  "foreplay-platform",
  "image",
@@ -1865,9 +1868,10 @@ dependencies = [
 
 [[package]]
 name = "foreplay-script"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "foreplay-ir",
+ "libloading",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -1875,7 +1879,7 @@ dependencies = [
 
 [[package]]
 name = "foreplay-threejs"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "bevy_math",
  "foreplay-atlas",
@@ -1890,7 +1894,7 @@ dependencies = [
 
 [[package]]
 name = "foreplay-verifier"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "bevy_ecs",
  "bevy_math",

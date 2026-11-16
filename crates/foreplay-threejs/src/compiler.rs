@@ -109,7 +109,14 @@ pub fn compile_ir_to_threejs_project(
     // 9. src/main.ts
     files.insert("src/main.ts".into(), generate_main_ts(opts));
 
-    // 10. src/atlas.json (if enabled)
+    // 10. src/polyamour_runtime.ts
+    let polyamour_assets = crate::parametric_polyamour::extract_polyamour_assets_from_scene(scene);
+    files.insert(
+        "src/polyamour_runtime.ts".into(),
+        crate::parametric_polyamour::generate_polyamour_runtime_ts(&polyamour_assets),
+    );
+
+    // 11. src/atlas.json (if enabled)
     if opts.include_atlas_json {
         let atlas_json = generate_atlas_json(scene, &all_knobs)?;
         files.insert("src/atlas.json".into(), atlas_json);
@@ -328,56 +335,9 @@ fn generate_scene_ts(scene: &IrScene) -> String {
 
         ts.push_str(&format!("    // Node [{}: {} ({})]\n", id_idx, node.name, node.class_name));
 
-        let polyamour_primitive = node.properties.get("polyamour_primitive").and_then(|v| match v {
-            IrValue::String(s) => Some(s.as_str()),
-            _ => None,
-        });
-        let polyamour_subsurf = node.properties.get("polyamour_subsurf").and_then(|v| match v {
-            IrValue::I64(i) => Some(*i as usize),
-            IrValue::F64(f) => Some(*f as usize),
-            _ => None,
-        });
-
-        if polyamour_primitive.is_some() || polyamour_subsurf.is_some() {
-            let prim_name = polyamour_primitive.unwrap_or("Cube");
-            let tri_mesh = generate_polyamour_mesh(prim_name, &node.properties, polyamour_subsurf);
-            let color_hex = extract_color_hex(&node.properties);
-            let metal = extract_num_prop(&node.properties, "metalness", 0.1);
-            let rough = extract_num_prop(&node.properties, "roughness", 0.5);
-
-            let mut flat_positions = Vec::with_capacity(tri_mesh.positions.len() * 3);
-            for p in &tri_mesh.positions {
-                flat_positions.push(p.x);
-                flat_positions.push(p.y);
-                flat_positions.push(p.z);
-            }
-            let mut flat_normals = Vec::with_capacity(tri_mesh.normals.len() * 3);
-            for n in &tri_mesh.normals {
-                flat_normals.push(n.x);
-                flat_normals.push(n.y);
-                flat_normals.push(n.z);
-            }
-            let pos_str = format_float_array(&flat_positions);
-            let norm_str = format_float_array(&flat_normals);
-            let idx_str = format_uint_array(&tri_mesh.indices);
-
-            ts.push_str(&format!(
-                "    const geom_{id_idx} = new THREE.BufferGeometry();\n\
-                \x20   const pos_{id_idx} = new Float32Array({pos_str});\n\
-                \x20   const norm_{id_idx} = new Float32Array({norm_str});\n\
-                \x20   const idx_{id_idx} = new Uint32Array({idx_str});\n\
-                \x20   geom_{id_idx}.setAttribute('position', new THREE.BufferAttribute(pos_{id_idx}, 3));\n\
-                \x20   geom_{id_idx}.setAttribute('normal', new THREE.BufferAttribute(norm_{id_idx}, 3));\n\
-                \x20   geom_{id_idx}.setIndex(new THREE.BufferAttribute(idx_{id_idx}, 1));\n\
-                \x20   const mat_{id_idx} = new THREE.MeshStandardMaterial({{\n\
-                \x20       color: {color_hex},\n\
-                \x20       metalness: {metal},\n\
-                \x20       roughness: {rough},\n\
-                \x20   }});\n\
-                \x20   const {node_var} = new THREE.Mesh(geom_{id_idx}, mat_{id_idx});\n\
-                \x20   {node_var}.castShadow = true;\n\
-                \x20   {node_var}.receiveShadow = true;\n"
-            ));
+        if let Some(asset) = crate::parametric_polyamour::ThreeJsParametricPolyamourAsset::from_node(node) {
+            let asset_code = crate::parametric_polyamour::generate_node_scene_ts(&asset);
+            ts.push_str(&asset_code);
         } else {
             match node.class_name.as_str() {
                 "Camera3D" => {
@@ -570,6 +530,7 @@ fn generate_main_ts(opts: &ThreeJsExportOptions) -> String {
         import {{ buildScene }} from './scene';\n\
         import {{ SignalBus, initSignalConnections }} from './signals';\n\
         import {{ feelStore, mountFeelDevHud }} from './feel';\n\
+        import {{ ParametricPolyamourController }} from './polyamour_runtime';\n\
         import {{ registerBehaviors, Behavior, BehaviorContext, InputState }} from './scripts/behaviors';\n\n\
         const canvas = document.getElementById('canvas') as HTMLCanvasElement;\n\
         const signalBus = new SignalBus();\n\n\
@@ -639,6 +600,9 @@ fn generate_main_ts(opts: &ThreeJsExportOptions) -> String {
             const behaviorMap = new Map<number, Behavior>();\n\
             for (const b of behaviors) behaviorMap.set(b.nodeId, b);\n\n\
             initSignalConnections(signalBus, behaviorMap);\n\n\
+            const polyamour = ParametricPolyamourController.initRuntime(scene, nodes);\n\
+            polyamour.bindFeelKnobs(feelStore);\n\
+            (window as any).__polyamour = polyamour;\n\n\
             if ({mount_hud}) {{\n\
                 mountFeelDevHud(feelStore);\n\
             }}\n\n\
@@ -685,6 +649,7 @@ fn generate_main_ts(opts: &ThreeJsExportOptions) -> String {
                         b.process(frameDelta, b.ctx);\n\
                     }}\n\
                 }}\n\n\
+                polyamour.tick(frameDelta, currentTime / 1000.0);\n\n\
                 if ('renderAsync' in renderer) {{\n\
                     (renderer as any).renderAsync(scene, camera);\n\
                 }} else {{\n\
@@ -819,117 +784,7 @@ fn extract_color_hex(props: &BTreeMap<String, IrValue>) -> String {
     }
 }
 
-fn generate_polyamour_mesh(
-    primitive_name: &str,
-    props: &BTreeMap<String, IrValue>,
-    subsurf_level: Option<usize>,
-) -> foreplay_polyamour::TriangulatedMesh {
-    let clean_name = primitive_name.to_ascii_lowercase();
-    let base_mesh = match clean_name.as_str() {
-        "quarterpipe" => {
-            let radius = extract_num_prop(props, "radius", 2.0) as f32;
-            let width = extract_num_prop(props, "width", 4.0) as f32;
-            let segments = extract_num_prop(props, "segments", 6.0) as u32;
-            foreplay_polyamour::primitive_quarterpipe(radius, width, segments.max(3))
-        }
-        "stairset" | "stair_set" | "stairs" => {
-            let width = extract_num_prop(props, "width", 3.0) as f32;
-            let height = extract_num_prop(props, "height", 2.0) as f32;
-            let depth = extract_num_prop(props, "depth", 3.0) as f32;
-            let count = extract_num_prop(props, "step_count", 4.0) as u32;
-            foreplay_polyamour::primitive_stair_set(width, height, depth, count.max(2))
-        }
-        "torus" => {
-            let major = extract_num_prop(props, "major_radius", 2.0) as f32;
-            let minor = extract_num_prop(props, "minor_radius", 0.5) as f32;
-            let major_seg = extract_num_prop(props, "major_segments", 12.0) as u32;
-            let minor_seg = extract_num_prop(props, "minor_segments", 8.0) as u32;
-            foreplay_polyamour::primitive_torus(major, minor, major_seg.max(4), minor_seg.max(3))
-        }
-        "cylinder" => {
-            let radius = extract_num_prop(props, "radius", 1.0) as f32;
-            let height = extract_num_prop(props, "height", 2.0) as f32;
-            let seg = extract_num_prop(props, "segments", 12.0) as u32;
-            foreplay_polyamour::primitive_cylinder(radius, height, seg.max(3))
-        }
-        "cone" => {
-            let radius = extract_num_prop(props, "radius", 1.0) as f32;
-            let height = extract_num_prop(props, "height", 2.0) as f32;
-            let seg = extract_num_prop(props, "segments", 12.0) as u32;
-            foreplay_polyamour::primitive_cone(radius, height, seg.max(3))
-        }
-        "icosphere" | "ico_sphere" => {
-            let radius = extract_num_prop(props, "radius", 1.0) as f32;
-            let sub = extract_num_prop(props, "subdivisions", 1.0) as u32;
-            foreplay_polyamour::primitive_ico_sphere(radius, sub)
-        }
-        "uvsphere" | "uv_sphere" | "sphere" => {
-            let radius = extract_num_prop(props, "radius", 1.0) as f32;
-            let rings = extract_num_prop(props, "rings", 8.0) as u32;
-            let seg = extract_num_prop(props, "segments", 12.0) as u32;
-            foreplay_polyamour::primitive_uv_sphere(radius, rings.max(3), seg.max(3))
-        }
-        "plane" => {
-            let size = extract_num_prop(props, "size", 4.0) as f32;
-            foreplay_polyamour::primitive_plane(size)
-        }
-        "grid" => {
-            let w = extract_num_prop(props, "width", 10.0) as f32;
-            let d = extract_num_prop(props, "depth", 10.0) as f32;
-            let sx = extract_num_prop(props, "subs_x", 4.0) as u32;
-            let sz = extract_num_prop(props, "subs_z", 4.0) as u32;
-            foreplay_polyamour::primitive_grid(w, d, sx.max(1), sz.max(1))
-        }
-        _ => {
-            let size = extract_num_prop(props, "size", 2.0) as f32;
-            foreplay_polyamour::primitive_cube(size)
-        }
-    };
 
-    let poly_mesh = if let Some(lvl) = subsurf_level {
-        if lvl > 0 {
-            let stack = vec![foreplay_polyamour::PolyModifier::Subdivision {
-                levels: lvl.min(3) as u8,
-                simple: false,
-            }];
-            foreplay_polyamour::evaluate_modifier_stack(&base_mesh, &stack)
-        } else {
-            base_mesh
-        }
-    } else {
-        base_mesh
-    };
-
-    poly_mesh.triangulate()
-}
-
-fn format_float_array(floats: &[f32]) -> String {
-    let mut out = String::from("[");
-    for (i, &f) in floats.iter().enumerate() {
-        if i > 0 {
-            out.push(',');
-        }
-        if f.fract() == 0.0 {
-            out.push_str(&format!("{f:.1}"));
-        } else {
-            out.push_str(&format!("{f:.4}"));
-        }
-    }
-    out.push(']');
-    out
-}
-
-fn format_uint_array(uints: &[u32]) -> String {
-    let mut out = String::from("[");
-    for (i, &u) in uints.iter().enumerate() {
-        if i > 0 {
-            out.push(',');
-        }
-        out.push_str(&u.to_string());
-    }
-    out.push(']');
-    out
-}
 
 #[cfg(test)]
 mod tests {
@@ -1072,5 +927,93 @@ mod tests {
         assert!(scene_ts.contains("setAttribute('normal'"));
         assert!(scene_ts.contains("setIndex("));
         assert!(scene_ts.contains("MegaQuarterpipe"));
+    }
+
+    #[test]
+    fn compiles_polyamour_node_with_uv2_morph_and_grind_splines_to_threejs_bundle() {
+        let mut scene = IrScene::new("PolyamourFullSkate");
+        let ramp_id = NodeId::new(20, 1).unwrap();
+        let mut props = BTreeMap::new();
+        props.insert("polyamour_primitive".into(), IrValue::String("Quarterpipe".into()));
+        props.insert("radius".into(), IrValue::F64(4.0));
+        props.insert("width".into(), IrValue::F64(8.0));
+        props.insert("segments".into(), IrValue::I64(6));
+        props.insert("grind_edges".into(), IrValue::String("[[0, 1], [1, 2], [2, 3]]".into()));
+
+        // Shape key delta
+        let deltas = vec![[0.0, 0.5, 0.0]; 16];
+        let mut deltas_map = BTreeMap::new();
+        deltas_map.insert("CopingLift".to_string(), deltas);
+        props.insert("shape_key_deltas".into(), IrValue::String(serde_json::to_string(&deltas_map).unwrap()));
+
+        scene.nodes.insert(
+            ramp_id,
+            IrNode {
+                id: ramp_id,
+                name: "FeatureRamp".into(),
+                class_name: "MeshInstance3D".into(),
+                parent: None,
+                instance_scene: None,
+                properties: props,
+                groups: vec!["ramp".into()],
+            },
+        );
+
+        let opts = ThreeJsExportOptions::default();
+        let bundle = compile_ir_to_threejs_project(&scene, &BTreeMap::new(), &BTreeMap::new(), &opts)
+            .expect("Compilation succeeds");
+
+        assert!(bundle.files.contains_key("src/polyamour_runtime.ts"));
+        let scene_ts = &bundle.files["src/scene.ts"];
+        assert!(scene_ts.contains("setAttribute('uv2'"));
+        assert!(scene_ts.contains("setAttribute('uv1'"));
+        assert!(scene_ts.contains("morphAttributes.position"));
+        assert!(scene_ts.contains("CopingLift"));
+        assert!(scene_ts.contains("userData.grindSplines"));
+        assert!(scene_ts.contains("new THREE.CatmullRomCurve3"));
+
+        let main_ts = &bundle.files["src/main.ts"];
+        assert!(main_ts.contains("ParametricPolyamourController.initRuntime"));
+    }
+
+    #[test]
+    fn compiles_polyamour_polyops2_transcript_to_threejs_bundle() {
+        let mut scene = IrScene::new("TranscriptScene");
+        let box_id = NodeId::new(21, 1).unwrap();
+        let mut props = BTreeMap::new();
+        props.insert("polyamour_primitive".into(), IrValue::String("Cube".into()));
+        props.insert(
+            "polyops_v2".into(),
+            IrValue::String(
+                "polyops 2\n\
+                select_face 4\n\
+                extrude_faces 4 distance=1.2\n\
+                tag_edge 0-1 tag=\"grind_edge\"\n"
+                    .into(),
+            ),
+        );
+
+        scene.nodes.insert(
+            box_id,
+            IrNode {
+                id: box_id,
+                name: "GrindLedge".into(),
+                class_name: "MeshInstance3D".into(),
+                parent: None,
+                instance_scene: None,
+                properties: props,
+                groups: vec![],
+            },
+        );
+
+        let opts = ThreeJsExportOptions::default();
+        let bundle = compile_ir_to_threejs_project(&scene, &BTreeMap::new(), &BTreeMap::new(), &opts)
+            .expect("Compilation succeeds");
+
+        assert!(bundle.files.contains_key("src/polyamour_runtime.ts"));
+        let scene_ts = &bundle.files["src/scene.ts"];
+        assert!(scene_ts.contains("userData.grindSplines"));
+        assert!(scene_ts.contains("new THREE.CatmullRomCurve3"));
+        assert!(scene_ts.contains("setAttribute('uv2'"));
     }
 }

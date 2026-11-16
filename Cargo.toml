@@ -23,7 +23,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 rust-version = "1.95"
 repository = "https://github.com/xirtus/Foreplay"
@@ -47,6 +47,7 @@ winit = "0.30.13"
 bytemuck = { version = "1.25.2", features = ["derive"] }
 pollster = "1.0.1"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "hdr", "tga", "bmp"] }
+libloading = "0.8.9"
 
 # Production 2D & 3D Physics (Rapier alongside PortFaithful live hotswap)
 rapier2d = { version = "0.36.1", features = ["enhanced-determinism", "serde-serialize"] }

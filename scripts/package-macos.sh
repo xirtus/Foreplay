@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-VERSION="${FOREPLAY_VERSION:-1.0.0}"
+VERSION="${FOREPLAY_VERSION:-1.1.0}"
 DIST_DIR="$ROOT_DIR/dist/macos"
 ICON_DIR="$ROOT_DIR/dist/icons"
 APP_DIR="$DIST_DIR/Foreplay.app"

@@ -61,6 +61,18 @@ use foreplay_verifier::v1_godot_parity_fuzzers::{
     verify_rapier_port_hotswap_and_controller_proptest_suite,
     verify_tres_manifest_fuzzing_suite,
 };
+use foreplay_verifier::v1_1_polyamour_nextgen_fuzzers::{
+    verify_gpu_bvh_pathtracer_and_radiance_cascades_suite,
+    verify_player_live_polyamour_and_threejs_parametric_suite,
+    verify_plnk_livelink_wire_protocol_fuzz_suite,
+    verify_polyops_v2_parser_and_replay_fuzz_suite,
+    verify_rust_hot_reload_schema_migration_suite,
+    verify_sculpt_symmetry_and_heat_bone_weights_suite,
+    verify_semantic_grind_splines_and_uv2_atlas_suite,
+    verify_sexlife_moan_and_splicy_edl_fuzz_suite,
+    verify_subobject_raycast_and_proportional_edit_suite,
+    verify_wasm_custom_section_adversarial_suite,
+};
 use foreplay_verifier::wave2b_fuzzers::{
     verify_1000_frame_physics_differential_gate, verify_fpck_archive_adversarial_suite,
     verify_gdshader_compiler_adversarial_suite, verify_godot4_200_scene_conformance_gate,
@@ -573,11 +585,11 @@ fn test_frame_differential_verdict_adversarial_oracle() {
     );
 }
 
-/// Unit test verifying all 42 adversarial suites via public run_all_adversarial_suites() API.
+/// Unit test verifying all 52 adversarial suites via public run_all_adversarial_suites() API.
 #[test]
 fn test_run_all_adversarial_suites_receipts() {
     let receipts = run_all_adversarial_suites();
-    assert_eq!(receipts.len(), 42);
+    assert_eq!(receipts.len(), 52);
     for r in &receipts {
         assert!(
             r.invariants_held,
@@ -815,5 +827,80 @@ fn test_phase16_audio_ringbuffer_and_input_deadzone_suite() {
     assert!(r.invariants_held, "audio ringbuffer and input deadzone suite failed invariants!");
     assert!(r.cases_executed >= 100);
 }
+
+// -----------------------------------------------------------------------------
+// Phase 21: Independent Red-Team v1.1.0 Polyamour & Next-Gen Adversarial Suites
+// -----------------------------------------------------------------------------
+
+#[test]
+fn test_phase21_plnk_livelink_wire_protocol_fuzz_suite() {
+    let r = verify_plnk_livelink_wire_protocol_fuzz_suite();
+    assert!(r.invariants_held, "PLNK live-link wire protocol suite failed invariants!");
+    assert!(r.cases_executed >= 50);
+}
+
+#[test]
+fn test_phase21_polyops_v2_parser_and_replay_fuzz_suite() {
+    let r = verify_polyops_v2_parser_and_replay_fuzz_suite();
+    assert!(r.invariants_held, "polyops v2 parser and replay suite failed invariants!");
+    assert!(r.cases_executed >= 20);
+}
+
+#[test]
+fn test_phase21_subobject_raycast_and_proportional_edit_suite() {
+    let r = verify_subobject_raycast_and_proportional_edit_suite();
+    assert!(r.invariants_held, "subobject raycast & proportional edit suite failed invariants!");
+    assert!(r.cases_executed >= 30);
+}
+
+#[test]
+fn test_phase21_sculpt_symmetry_and_heat_bone_weights_suite() {
+    let r = verify_sculpt_symmetry_and_heat_bone_weights_suite();
+    assert!(r.invariants_held, "sculpt symmetry & heat bone weights suite failed invariants!");
+    assert!(r.cases_executed >= 30);
+}
+
+#[test]
+fn test_phase21_semantic_grind_splines_and_uv2_atlas_suite() {
+    let r = verify_semantic_grind_splines_and_uv2_atlas_suite();
+    assert!(r.invariants_held, "semantic grind splines & uv2 atlas suite failed invariants!");
+    assert!(r.cases_executed >= 20);
+}
+
+#[test]
+fn test_phase21_wasm_custom_section_adversarial_suite() {
+    let r = verify_wasm_custom_section_adversarial_suite();
+    assert!(r.invariants_held, "WASM custom section adversarial suite failed invariants!");
+    assert!(r.cases_executed >= 10);
+}
+
+#[test]
+fn test_phase21_rust_hot_reload_schema_migration_suite() {
+    let r = verify_rust_hot_reload_schema_migration_suite();
+    assert!(r.invariants_held, "rust hot reload schema migration suite failed invariants!");
+    assert!(r.cases_executed >= 20);
+}
+
+#[test]
+fn test_phase21_sexlife_moan_and_splicy_edl_fuzz_suite() {
+    let r = verify_sexlife_moan_and_splicy_edl_fuzz_suite();
+    assert!(r.invariants_held, "sexlife moan & splicy edl fuzz suite failed invariants!");
+    assert!(r.cases_executed >= 50);
+}
+
+#[test]
+fn test_phase21_gpu_bvh_pathtracer_and_radiance_cascades_suite() {
+    let r = verify_gpu_bvh_pathtracer_and_radiance_cascades_suite();
+    assert!(r.invariants_held, "GPU BVH pathtracer & radiance cascades suite failed invariants!");
+    assert!(r.cases_executed >= 10);
+}
+
+#[test]
+fn test_phase21_player_live_polyamour_and_threejs_parametric_suite() {
+    let r = verify_player_live_polyamour_and_threejs_parametric_suite();
+    assert!(r.invariants_held, "player live polyamour & threejs parametric suite failed invariants!");
+    assert!(r.cases_executed >= 10);
+}
+
 
 

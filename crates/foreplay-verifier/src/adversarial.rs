@@ -22,6 +22,18 @@ use crate::v2_worldclass_fuzzers::{
     verify_trimesh_gjk_ragdoll_and_moan_timeline_suite,
     verify_ue6_speculative_rollback_determinism_suite,
 };
+use crate::v1_1_polyamour_nextgen_fuzzers::{
+    verify_gpu_bvh_pathtracer_and_radiance_cascades_suite,
+    verify_player_live_polyamour_and_threejs_parametric_suite,
+    verify_plnk_livelink_wire_protocol_fuzz_suite,
+    verify_polyops_v2_parser_and_replay_fuzz_suite,
+    verify_rust_hot_reload_schema_migration_suite,
+    verify_sculpt_symmetry_and_heat_bone_weights_suite,
+    verify_semantic_grind_splines_and_uv2_atlas_suite,
+    verify_sexlife_moan_and_splicy_edl_fuzz_suite,
+    verify_subobject_raycast_and_proportional_edit_suite,
+    verify_wasm_custom_section_adversarial_suite,
+};
 use crate::v1_godot_parity_fuzzers::{
     verify_audio_ringbuffer_and_input_deadzone_suite,
     verify_bbcode_and_terrain_autotiler_suite,
@@ -556,5 +568,16 @@ pub fn run_all_adversarial_suites() -> Vec<VerificationReceipt> {
         verify_fpckexec_binary_trailer_adversarial_suite(),
         verify_bbcode_and_terrain_autotiler_suite(),
         verify_audio_ringbuffer_and_input_deadzone_suite(),
+        // Phase 21: Independent Red-Team v1.1.0 Polyamour & Next-Gen Adversarial Verifier
+        verify_plnk_livelink_wire_protocol_fuzz_suite(),
+        verify_polyops_v2_parser_and_replay_fuzz_suite(),
+        verify_subobject_raycast_and_proportional_edit_suite(),
+        verify_sculpt_symmetry_and_heat_bone_weights_suite(),
+        verify_semantic_grind_splines_and_uv2_atlas_suite(),
+        verify_wasm_custom_section_adversarial_suite(),
+        verify_rust_hot_reload_schema_migration_suite(),
+        verify_sexlife_moan_and_splicy_edl_fuzz_suite(),
+        verify_gpu_bvh_pathtracer_and_radiance_cascades_suite(),
+        verify_player_live_polyamour_and_threejs_parametric_suite(),
     ]
 }

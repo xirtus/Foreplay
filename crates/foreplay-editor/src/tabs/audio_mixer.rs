@@ -170,6 +170,35 @@ pub fn show(app: &mut ForeplayEditorApp, ui: &mut Ui) {
             }
         });
     });
+
+    ui.separator();
+
+    // 3. SexLife Moan Adaptive Music DAW & Stem Manifest Tray
+    ui.collapsing("🎵 SexLife Moan DAW — Adaptive Skate Soundtrack Stems", |ui| {
+        ui.horizontal_wrapped(|ui| {
+            let moan_link = foreplay_script::MoanProjectStemLink::default_skate_soundtrack();
+            let feel_intensity = ((speed - 5.0) / 15.0).clamp(0.0, 1.0);
+            let snap = moan_link.evaluate_adaptive_mix(feel_intensity, true, 16.0);
+
+            ui.group(|ui| {
+                ui.label(RichText::new("Track: 'SkateOrCry_Mix' (120.0 BPM)").strong().color(CHROMA_AMBER_AUDIO));
+                ui.label(format!("Bar: {} | Beat: {:.1} | Intensity: {:.2}", snap.current_bar, snap.beat_in_bar, snap.intensity));
+                let trans_str = if snap.is_quantized_transition_point { "● QUANTIZED TRANSITION" } else { "○ IN-BAR" };
+                ui.colored_label(CHROMA_MINT_UI, trans_str);
+            });
+
+            for (stem_name, gain) in &snap.stem_gains {
+                let cutoff = snap.stem_cutoffs_hz.get(stem_name).copied().unwrap_or(20000.0);
+                ui.group(|ui| {
+                    ui.label(RichText::new(stem_name).strong().color(CHROMA_CYAN_2D));
+                    ui.label(format!("Gain: {:.2}", gain));
+                    ui.label(format!("Cutoff: {:.0} Hz", cutoff));
+                    let audible = *gain > 0.05;
+                    ui.colored_label(if audible { COLOR_SUCCESS_GREEN } else { COLOR_TEXT_MUTED }, if audible { "● AUDIBLE" } else { "○ MUTED" });
+                });
+            }
+        });
+    });
 }
 
 fn render_channel_strip(ui: &mut Ui, strip: &mut AudioBusStrip) {

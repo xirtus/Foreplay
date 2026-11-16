@@ -78,7 +78,7 @@ fn main() {
         }
         "verify-all-gates" => {
             println!("============================================================");
-            println!("Foreplay 8-Gate Headless Verification Suite");
+            println!("Foreplay 10-Gate Headless Verification Suite");
             println!("============================================================");
 
             let all_report = foreplay_harness::run_all_verification_gates();
@@ -86,7 +86,7 @@ fn main() {
             for gate in &all_report.gates {
                 let status_str = if gate.passed { "PASS" } else { "FAIL" };
                 println!(
-                    "[{}/8] {} ({status_str} in {}ms)",
+                    "[{}/10] {} ({status_str} in {}ms)",
                     gate.gate_number, gate.name, gate.duration_ms
                 );
                 println!("      Details: {}", gate.details);
@@ -95,7 +95,7 @@ fn main() {
             println!("============================================================");
             if all_report.all_passed() {
                 println!(
-                    "ALL 8 VERIFICATION GATES PASSED (100% GREEN) in {}ms",
+                    "ALL 10 VERIFICATION GATES PASSED (100% GREEN) in {}ms",
                     all_report.total_duration_ms
                 );
                 println!("============================================================");

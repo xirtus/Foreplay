@@ -167,3 +167,31 @@ Following **3JSE Principle #1** (*"Bevy is a dependency, never a fork"*), Forepl
   - `16.1` 12 new `proptest` & hostile binary corruption fuzzers across `.glb`, `.tres`, GDScript coroutines/LSP, `GDExtension` C ABI marshaling, `Rapier` hotswap, `TileMap` autotiling, and `FPCKEXEC` trailers `[semantic]` (Carbon Verifier)
   - *Verified Exit Gate:* **42 / 42** adversarial suites (`69/69` verifier tests) & **438 / 438** total tests across all **19 crates** (`82,166 LoC`) PASS 100% green with **0 clippy warnings** and **0 stubs**.
 
+
+
+---
+
+## 7. Foreplay v1.1.0 — Deep Polyamour Zero-Export Integration & Next-Gen Engine Upgrade (Phases 17–21 COMPLETE)
+
+- [x] **Phase 17 — Polyamour `sex-3d` Live-Link, Sub-Object Raycast Modeling, Semantic Tags & BVH Sculpt/Rigging (`foreplay-polyamour`) (COMPLETE)**
+  - `17.1` Bidirectional `poly://` (`PLNK`) Live-Link server/client streaming dirty `HalfEdgeMesh` deltas, selections, and cross-app Undo markers `[semantic]` (Carbon High)
+  - `17.2` Sub-object `1/2/3` Vertex/Edge/Face raycast picking, edge-loop/ring select, proportional editing (`O`), and parameterized `polyops 2` transcript engine `[semantic]` (Carbon High)
+  - `17.3` Semantic edge/face tag compiler (`grind_edge` -> 3D skate splines, `collision_convex`/`collision_trimesh` -> physics colliders, smart-project UV2 lightmap islands) `[semantic]` (Carbon High)
+  - `17.4` BVH-accelerated sculpt brushes (`Grab`, `ClayStrips`, `Crease`, `Smooth`, `Inflate`, `Flatten` + XYZ symmetry), heat-diffusion auto-rig bone weights, and `ShapeKeySet` blendshapes `[semantic]` (Carbon High)
+  - *Verified Exit Gate:* `37/37` `foreplay-polyamour` tests & Gate 9 PASS (`0.11s`, normalized `sum(weights) == 1.0`, zero-overlap Smart UV2, and 120Hz `PLNK` delta sync).
+- [x] **Phase 18 — WGSL GPU Compute Path-Tracer + SVGF Denoiser + Zero-Copy `egui_wgpu` Viewport (`foreplay-render`) (COMPLETE)**
+  - `18.1` Hardware `wgpu` `@compute` BVH GGX path tracer + À-Trous edge-stopping SVGF denoiser + AgX + `@compute` Radiance Cascades GI `[semantic]` (Carbon High)
+  - `18.2` `ZeroCopyViewportBridge` (`egui_wgpu::Renderer::register_native_texture`) eliminating CPU `MAP_READ` readback in desktop GUI + 120Hz `SurfaceSwapchainPresenter` `[semantic]` (Carbon High)
+  - *Verified Exit Gate:* `64/64` `foreplay-render` tests & Gate 10 PASS on Apple Silicon Metal hardware (`0.49s`, zero warnings).
+- [x] **Phase 19 — Native Rust `.dylib` Hot-Reload, `sexlife` Pro-Apps Bridge, WASM Custom-Section Exporter & Live Runtime (`foreplay-script`, `foreplay-export`, `foreplay-threejs`, `foreplay-player`) (COMPLETE)**
+  - `19.1` `#[repr(C)]` `ForeplayRustPluginVTable` + shadow-copied `libloading` `.dylib`/`.so` hot-reloader with state-preserving `IrValue` migration + `MoanProjectStemLink` & `SplicyCutsceneEdl` in `foreplay-script` `[semantic]` (Carbon High)
+  - `19.2` `WasmWebGpuPackager` embedding `.fpck` inside a spec-compliant WebAssembly `"foreplay_fpck"` custom section + WebGPU/WebAudio JS loader & PWA worker in `foreplay-export` `[mechanical]` (Hydrogen)
+  - `19.3` Live parametric Polyamour modifiers, morph targets & `grind_edge` `CatmullRomCurve3` splines in `foreplay-threejs` + live `poly://` mid-gameplay mesh & `RapierSpace3D` collider hot-streaming in `foreplay-player` `[mechanical]` (Hydrogen + Carbon)
+  - *Verified Exit Gate:* Live `rustc --crate-type cdylib` v1->v2 hot-reload (<0.5s), WASM `FPCKWASM` round-trip, Three.js parametric runtime, and `foreplay-player --self-test` 6/6 stages PASS with zero momentum loss.
+- [x] **Phase 20 — Studio IDE Polyamour Sub-Object/Sculpt/Live-Link UX & 10-Gate Harness (`foreplay-editor`, `foreplay-harness`) (COMPLETE)**
+  - `20.1` Interactive `1/2/3` sub-object picking, Sculpt mode, semantic tag compiler, `⌘E` Polyamour Live-Link, GPU Compute Path-Trace + SVGF toggle, `ZeroCopyViewportBridge` HUD, Rust hot-reload & `Moan`/`Splicy` controls, and **10-Gate** `verify-all-gates` `[mechanical]` (Hydrogen)
+  - *Verified Exit Gate:* **10 / 10 Verification Gates** (`904ms`) & `foreplay-editor --headless` across all 8 workspaces, 7 bottom docks, and 5 modals PASS 100% green.
+- [x] **Phase 21 — v1.1 Independent Red-Team Adversarial Verifier (`foreplay-verifier`) (COMPLETE)**
+  - `21.1` 10 new `proptest` & corruption fuzzers (**52 / 52 total suites**) across `PLNK` live-link frames, `polyops 2`, raycast/BVH sculpt, heat weights, WASM custom sections, Rust hot-reload migration, and `Moan`/`Splicy` codecs `[semantic]` (Carbon Verifier)
+  - *Verified Exit Gate:* **52 / 52** adversarial suites (`79/79` verifier tests) & **557 / 557** total tests across all **19 crates** (`97,333 LoC`) PASS 100% green with **0 clippy warnings** and **0 stubs**.
+

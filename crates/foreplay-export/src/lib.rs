@@ -5,9 +5,11 @@
 
 pub mod archive;
 pub mod bundle;
+pub mod wasm_webgpu;
 
 pub use archive::{FpckArchive, FpckError, TocEntry, fnv1a_64};
 pub use bundle::{
     ExportConfig, ExportError, ExportOutput, ExportTarget, ProjectExporter,
     verify_self_contained_export_binary, verify_self_contained_export_bytes,
 };
+pub use wasm_webgpu::{WasmWebGpuPackager, extract_and_verify_wasm_fpck_section};
